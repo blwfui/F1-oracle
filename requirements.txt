@@ -1,0 +1,7 @@
+fastf1>=3.3.0
+pandas>=2.0
+numpy>=1.24
+streamlit>=1.35
+plotly>=5.20
+requests>=2.32
+pyarrow>=15.0
