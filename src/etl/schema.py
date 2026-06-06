@@ -82,4 +82,16 @@ CREATE TABLE IF NOT EXISTS sessions (
     position     INTEGER,
     PRIMARY KEY (year, round, driver, session_type)
 );
+
+CREATE TABLE IF NOT EXISTS sprint_points (
+    year     INTEGER NOT NULL,
+    round    INTEGER NOT NULL,
+    driver   TEXT    NOT NULL,
+    position INTEGER,
+    points   REAL,
+    sq_pos   INTEGER,
+    PRIMARY KEY (year, round, driver)
+);
+
+CREATE INDEX IF NOT EXISTS idx_sprint_points_driver ON sprint_points(year, driver);
 """

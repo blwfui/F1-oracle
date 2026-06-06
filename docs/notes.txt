@@ -1,0 +1,170 @@
+导入新赛季数据前必查清单
+=========================
+
+1. Round 0 "Pre-Season Testing"
+   - 某些年份 events 表有 round=0 的记录
+   - NUM_CN 从 1 起，遇 0 必 KeyError 崩溃
+   - 修复：所有 events 查询加 `AND round > 0`（分站详情 + 赛道分析页）
+
+2. FastF1 正赛积分不准
+   - FastF1 基于圈速推算名次，与官方 F1 积分常有偏差
+   - 修复：`python scripts/fetch_official.py [年份]`（正赛+冲刺赛官方修正，已参数化）
+
+3. 冲刺赛积分
+    - build_sprint.py 已改为动态检测冲刺赛轮次（从赛季赛程中读取）
+    - fetch_official.py 已改为遍历所有轮次尝试获取冲刺赛数据
+    - 无需手动维护 SPRINT_ROUNDS 字典
+
+4. 车手翻译缺失
+   - 每年阵容不同，查 `SELECT DISTINCT driver FROM results WHERE year=X`
+   - 对照 DRIVER_CN / DRIVER_FULL_CN 补全
+
+5. 赛道名 / 站名翻译缺失
+   - 查 `SELECT DISTINCT location, event_name FROM events WHERE year=X`
+   - 对照 LOCATION_CN / EVENT_CN 补全
+
+6. 状态翻译缺失
+   - 查 `SELECT DISTINCT status FROM results WHERE year=X`
+   - 对照 STATUS_CN 补全（如 "Did not start"）
+
+7. 侧边栏年份
+   - 已改为动态 `f"{year} 赛季数据仓库"`，无需修改
+
+8. 核心脚本（均已参数化）
+   - ETL：`python -c "from src.etl.ingest import run; run(years=[年份])"`
+   - 练习赛/排位赛/SQ：`python scripts/import_sessions.py [年份] [fp|sq|q|all]`（2018-2024）
+   - 2025 专用：`python scripts/import_2025.py`
+   - 冲刺赛：`python scripts/build_sprint.py [年份]`
+   - 官方修正：`python scripts/fetch_official.py [年份]`
+
+9. 冲刺赛轮次动态检测
+   - build_sprint.py 从 get_event_schedule() 读取赛季赛程，检查 Session 列含 "Sprint" 即判定为冲刺赛轮次
+   - fetch_official.py 遍历所有轮次调用 API，空返回则跳过
+   - 历年冲刺赛场次：2021 3场, 2022 3场, 2023 6场, 2024 6场, 2025 6场
+   - 不再硬编码 SPRINT_ROUNDS 字典，加新年份无需手动维护
+
+10. 同分排序规则
+    - 车手同分 → 按 podiums DESC, 再 wins DESC
+    - 车队同分 → 按 wins DESC
+    - 涉及文件：app.py（仪表板图表+表格）、build_sprint.py（控制台）、fetch_official.py（控制台）
+    - 导入新赛季后确认同分情况排序正确
+
+11. 常见遗漏补充（车队更名 + 新车手 + 新状态码）
+    - 车队每年可能更名：2023 AlphaTauri → 2024 Racing Bulls；2019-23 Alfa Romeo → 2024 Kick Sauber
+    - 查 `SELECT DISTINCT team FROM results WHERE year=X` 对照 TEAM_CN / TEAM_FULL_CN / TEAM_COLORS 补全
+    - 状态码可能新增：如 Undertray, Collision damage, Withdrew
+    - 车手每年变动：查 `SELECT DISTINCT driver FROM results WHERE year=X` 对照翻译补全
+
+12. 最后一页翻译复查（赛道分析页）
+    - 导入新赛季后打开 Streamlit，翻到"赛道分析"页逐一检查下拉菜单和表格是否有英文
+    - 额外关注 country 字段可能存城市名（如 "Abu Dhabi" 而非 "UAE"）
+    - 赛历可能包含新赛道（如 2022 Le Castellet / 法国站）
+    - 验证 SQL：
+        SELECT DISTINCT location FROM events WHERE year=X     → 对照 LOCATION_CN
+        SELECT DISTINCT event_name FROM events WHERE year=X  → 对照 EVENT_CN
+        SELECT DISTINCT country FROM events WHERE year=X     → 对照 COUNTRY_CN
+
+13. fetch_official.py 注意事项
+    - status 字段：当前值为空/NULL 时用 Jolpi 数据补，否则保留 FastF1 详细退赛原因（CASE WHEN 保护）
+    - 排位赛数据：从 Jolpi API `/qualifying.json` 获取 Q1/Q2/Q3 时间 + 排位名次
+    - 冲刺赛数据从 `/sprint.json` 获取 position + points
+    - sprint_points 用 INSERT ... ON CONFLICT DO UPDATE 而非 DELETE+INSERT，保护 sq_pos 不被覆盖
+    - 不要并行跑多个年份，Jolpi API 会限流导致部分站跳过
+    - 2023+ F1 官方 API 本身就不提供详细退赛原因（只有 "Retired"），非我们覆盖导致
+    - 导入流程：build_sprint.py → fetch_official.py，顺序执行，勿并行
+
+14. 数据覆盖范围
+    - FastF1 完整数据最早到 2018 年（有圈速/天气/遥测）
+    - 2017 及更早：无圈速计时数据，Ergast API 不稳定，无法导入
+    - 当前已导入：2018-2025（8 个赛季）
+    - START_YEAR / END_YEAR 在 src/etl/ingest.py 中
+
+15. 导入新赛季完整流程（新赛季追加必看）
+    - Step 1：ETL `python -c "from src.etl.ingest import run; run(years=[年份])"`
+    - Step 2：练习赛/排位赛 `python scripts/import_sessions.py [年份]`
+    - Step 3：冲刺赛 `python scripts/build_sprint.py [年份]`
+    - Step 4：官方修正 `python scripts/fetch_official.py [年份]`（顺序执行，勿并行）
+    - Step 5：翻译验证（按第 4/5/6/11 条查 DB DISTINCT + 第 12 条赛道页复查）
+    - Step 6：核对积分榜 vs 官方赛季排名
+
+16. 2018 赛季特殊处理
+    - R14（意大利站）FastF1 v3.8.3 __fix_tyre_info IndexError bug
+      → ingest_race 中 session.laps 需 try/except DataNotLoadedError
+      → 结果表正常写入，圈速表跳过（sys:0 ErrorIndex）
+    - 轮胎体系：2018 使用 HYPERSOFT/ULTRASOFT/SUPERSOFT（2019 简化为 SOFT/MEDIUM/HARD）
+      → COMPOUND_CN 补：极软胎/超软胎/红软胎
+      → COMPOUND_COLORS 补 Pirelli 官方色：#E20074 粉 / #83309C 紫 / #DA291C 红
+    - 车队注意：Force India (→2019 Racing Point), Toro Rosso (→2020 AlphaTauri), Sauber (≠Kick Sauber)
+    - 车手注意：ERI（埃里克森）, HAR（哈特利）, SIR（斯洛特金）, VAN（范多恩）
+    - 赛事名注意：Brazilian GP ≠ São Paulo GP, Mexican GP ≠ Mexico City GP, 有 German GP
+    - 赛道注意：Hockenheim（霍根海姆）, Singapore（滨海湾, DB 存 "Singapore" 非 "Marina Bay"）
+    - 状态码：Out of fuel, Exhaust, Battery, Steering, Tyre
+    - 圈速 compound 字段含 "nan"/"None"（缺失轮胎数据）
+      → _comp() 拦截空值映射为 "无数据"，COMPOUND_COLORS 补灰色 #CCCCCC
+
+17. 练习赛数据导入（sessions 表）
+    - FastF1 练习赛 session.results 的 Position/Time 为 NaN
+      → 不能像正赛那样用 res 取值，必须从 session.laps 计算
+    - 加载必须 laps=True（不能用正赛的 laps=False/weather=True）
+    - 全量车手列表：用 s.results["Abbreviation"] 而非 lp["Driver"].unique()
+      → 后者遗漏未出场车手
+    - 排序规则：有时圈按圈速升序给 position；无时圈/未出场 position=NULL
+    - SQL ORDER BY 应处理 NULL 置末：
+      ORDER BY CASE WHEN position IS NULL THEN 1 ELSE 0 END, position
+    - 表格渲染三分：
+      best_lap_sec>0 → 正常排名+圈速
+      best_lap_sec IS NULL AND laps>0 → 排名"—"圈速"无数据"
+      best_lap_sec IS NULL AND laps=0 → 排名"—"圈速"未出场"
+
+18. 翻译检查完整对照 SQL（导入新赛季后跑一遍）
+    - 车手：SELECT DISTINCT driver FROM results WHERE year=X          → DRIVER_CN / DRIVER_FULL_CN
+    - 车队：SELECT DISTINCT team FROM results WHERE year=X           → TEAM_CN / TEAM_FULL_CN / TEAM_COLORS
+    - 赛事：SELECT DISTINCT event_name FROM events WHERE year=X AND round>0 → EVENT_CN
+    - 赛道：SELECT DISTINCT location FROM events WHERE year=X AND round>0   → LOCATION_CN
+    - 国家：SELECT DISTINCT country FROM events WHERE year=X AND round>0    → COUNTRY_CN
+    - 状态：SELECT DISTINCT status FROM results WHERE year=X         → STATUS_CN
+    - 轮胎：SELECT DISTINCT compound FROM laps WHERE year=X AND compound IS NOT NULL → COMPOUND_CN / COMPOUND_COLORS
+
+19. 可视化美化经验
+    - 天气卡片：HTML div + border-top 色条 + 背景温度段条；四列结构统一含底部占位
+    - 赛程日历：弃用柱状图，改用 3 列 CSS 卡片网格（左边界车队色 + 圆角徽章 + 赛道·日期·冠军）
+    - 结果表：领奖台金(#FFD700)/银(#C0C0C0)/铜(#CD7F32)左侧 3px 边界 + DNF 淡红背景(#FFF0F0)
+    - 车手成绩表：位置热力图（1=深绿 → 2-3=浅绿 → 4-5=微绿 → 6-10=白 → 11-15=淡橙 → 16+=淡红）
+    - 排名柱状图：px.bar(text="pts") + textposition="outside" 显示数值
+    - 前三名徽章：柱状图标签前缀 🥇🥈🥉，标题改 "🥇 车手积分榜"
+    - 走势图末端标注：fig.add_annotation 在每条线末点加车手名+积分，白底半透明 + 线色匹配
+    - 排名走势加水平虚线：fig.add_hline(y=3, line_dash="dash") 标注"领奖台"
+    - 统计卡片：HTML div 替换 st.metric，F1 红顶(#E10600) + 图标 + 大字体数值
+
+20. 冲刺排位赛 SQ 导入
+    - FastF1 session type "SQ" (Sprint Qualifying)
+    - 加载必须 `messages=True + laps=True`，否则 Position 全 NaN
+    - 赛事控制消息（race_control_messages）包含被删除的圈速（赛道边界违规），缺则无法计算排位名次
+    - Ergast 不支持冲刺排位赛，Q1/Q2/Q3 均为 NaN，只能取 Position 名次
+    - sq_pos 存入 sprint_points 表，作为冲刺赛发车位
+    - build_sprint.py 和 fetch_official.py 均改为 ON CONFLICT DO UPDATE 保护 sq_pos
+
+21. 练习赛/排位赛仪表板参数化
+    - PRACTICE_SESSIONS：模块顶层配置列表 [{type, label, color}]，驱动练习赛表格
+    - QUALI_PHASES：模块顶层配置列表 [{key, col, label, color}]，驱动排位赛 Q1/Q2/Q3
+    - _fmt_lap_time(sec)：共享时间格式化，None/NaN/0 返回 None
+    - 练习赛自适应列数：根据当前轮次实际有的 session_type 过滤 PRACTICE_SESSIONS
+    - 冲刺赛周末仅 FP1，无 FP2/FP3，过滤后自动只显示一列
+    - 新增 session 类型只需在配置列表加一行，无需改渲染逻辑
+
+22. 2025 赛季特殊处理
+    - 2025 实际 24 站（R1-R24），R25 不存在，硬编码 TOTAL_ROUNDS=25 会导致无限重试
+    - 修复：import_2025.py 从 events 表动态取 MAX(round) WHERE round>0
+    - ETL 的 INSERT OR REPLACE 会覆盖 q1_sec/q2_sec/q3_sec 为 NULL，必须在 ETL 之后单独跑排位修正
+    - 冲刺赛周末（6 站）：R2 中国、R6 迈阿密、R13 比利时、R19 奥斯汀、R21 巴西、R23 卡塔尔
+
+23. import_2025.py 自检循环
+    - 跳过 ETL，直接查缺补 FP + 排位 + SQ
+    - 120s 线程超时防 FastF1 网络卡死（独立 sqlite3 连接避共享冲突）
+    - 30 分钟自检间隔，全齐自动退出
+    - 排位赛从 Jolpi API 秒级获取，不会被卡
+
+24. sprint_points 表结构
+    - 列：year, round, driver (PK) | position, points, sq_pos
+    - sq_pos 由 FastF1 SQ session 填充，position/points 由 fetch_official.py 修正
+    - 两处 INSERT 都用 ON CONFLICT DO UPDATE 互不覆盖

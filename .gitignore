@@ -1,6 +1,18 @@
-﻿.env
+.env
 .idea/
 __pycache__/
 *.pyc
 *.pyo
+.venv/
 .streamlit/secrets.toml
+
+# Data & cache
+data/cache/
+data/*.db-shm
+data/*.db-wal
+data/*.log
+
+# Temp files
+*.txt
+!docs/*.txt
+db_output.txt
