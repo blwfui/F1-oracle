@@ -6,8 +6,13 @@ __pycache__/
 .venv/
 .streamlit/secrets.toml
 
+# Local agent workspaces (work logs / temp files — never publish)
+.workbuddy/
+.reasonix/
+
 # Data & cache
 data/cache/
+data/*.db
 data/*.db-shm
 data/*.db-wal
 data/*.log
