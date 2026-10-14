@@ -273,9 +273,15 @@ def ingest_race(db, year, round_number):
                 _safe_int(l.get("Stint")),
                 is_pit, is_best,
                 _safe_float(l.get("SpeedFL")),
+                _timedelta_seconds(l.get("Time")),
+                _timedelta_seconds(l.get("LapStartTime")),
+                str(l.get("TrackStatus", "")),
             ))
         db.executemany(
-            "INSERT OR REPLACE INTO laps VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "INSERT OR REPLACE INTO laps (year, round, driver, lap_number, position,"
+            " lap_time, sector1, sector2, sector3, compound, tyre_life, stint,"
+            " is_pit, is_best, speed_fl, time_sec, lap_start_sec, track_status)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             lap_rows,
         )
 
