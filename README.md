@@ -6,6 +6,13 @@
 
 **中文** ｜ [English](#english)
 
+> **Language note** — The dashboard UI and most in-code text are in **Chinese**. If you'd
+> like to use this project in another language, don't be put off: the translation surface is
+> small and lives in four files — see [Localization](#localization).
+
+> **语言说明** —— 界面与代码内的文案以中文为主。若要改成其他语言，改动面其实很小
+> （集中在四个文件），见 [本地化](#本地化改成其他语言)。
+
 ---
 
 ## 中文
@@ -119,6 +126,25 @@ docs/               评估报告与对标分析
 `src/model/` 的防泄漏是**结构性**的：`make_context()` 按预测时点（`pre_quali` / `post_quali`）
 决定哪些字段可见，而不是靠调用方自觉。回测框架强制用工厂函数创建预测器，
 避免有状态预测器在多次运行间残留。
+
+### 本地化（改成其他语言）
+
+所有**用户可见**的中文都集中在**四个文件**里。其余 `.py` 文件中的中文基本是**注释与命令行输出**，
+不影响界面，可以完全不管。
+
+| 改什么 | 文件 | 具体位置 |
+|---|---|---|
+| 侧边栏导航名 | `src/dashboard/app.py` | `nav_pages` 与 `_page_map` 两张表 |
+| 各页面标题与文案 | `src/dashboard/views/*.py` | 六个页面各一个文件 |
+| 车队显示名 | `src/dashboard/common.py` | `TEAM_CN` 字典（键是英文原名，值是显示名） |
+| 车手姓名 | `src/dashboard/names_cn.py` | `LAST_NAME_CN` 字典 + `auto_cn_short()` / `auto_cn_full()` |
+| AI 回答语言 | `src/dashboard/ai_chat.py` | `SCHEMA_PROMPT` 及其余提示词 |
+
+**数据库里存的是英文原名**（`VER` / `Mercedes` / `Monza`），中文只存在于展示层。
+也就是说：**只改上面这几处，不动数据库、不动模型**，界面就能换成任意语言。
+
+如果要做成**多语言切换**（而不是直接替换）：在 `common.py` 里加一层按 locale 取名的函数，
+让页面统一调用它 —— 这样就不必逐个去改六个页面文件。
 
 ### 已知局限
 
@@ -281,6 +307,26 @@ Leakage prevention in `src/model/` is **structural**: `make_context()` decides w
 are visible at each prediction point (`pre_quali` / `post_quali`) rather than trusting the
 caller. The backtest framework forces predictors to be created through a factory, so
 stateful predictors cannot leak across runs.
+
+### Localization
+
+Every **user-facing** Chinese string lives in just **four files**. The rest of the Chinese text
+in `.py` files is comments and CLI output — it never reaches the screen, and you can ignore it.
+
+| What to change | File | Where |
+|---|---|---|
+| Sidebar navigation | `src/dashboard/app.py` | the `nav_pages` and `_page_map` tables |
+| Page titles and copy | `src/dashboard/views/*.py` | one file per page (six pages) |
+| Team display names | `src/dashboard/common.py` | the `TEAM_CN` dict (keys are the English originals) |
+| Driver names | `src/dashboard/names_cn.py` | `LAST_NAME_CN` dict + `auto_cn_short()` / `auto_cn_full()` |
+| AI reply language | `src/dashboard/ai_chat.py` | `SCHEMA_PROMPT` and the other prompts |
+
+**The database stores English originals** (`VER` / `Mercedes` / `Monza`) — every Chinese string
+lives in the presentation layer. So you can switch the UI to any language **without touching the
+database or the model**.
+
+For a real language **toggle** rather than a straight replacement, add a locale-aware lookup in
+`common.py` and have the pages call that — you won't have to edit six page files.
 
 ### Known limitations
 
