@@ -129,6 +129,20 @@ docs/               评估报告与对标分析
 
 更详细的分析见 [`docs/`](docs/)：2026 新规年评估、与开源项目的同场同口径对标。
 
+### 关于与反馈
+
+这是一个**个人兴趣项目** —— 业余时间做的，没有团队，也不是产品。它起源于一个单纯的问题：
+「F1 的比赛结果到底能预测到什么程度？」
+
+正因为是业余项目，一定还有很多我没看到的问题。**如果发现 bug、数据口径错误，或者有更好的方法，
+欢迎随时开 issue**，也欢迎直接指出我哪里想错了。以下几类我尤其想知道：
+
+- **数据口径错误** —— 某个 `status` 被误判、某个字段的语义理解反了
+- **方法论漏洞** —— 某个特征其实造成了数据泄漏、某个检验用得不合适
+- **更好的预测信号** —— 有我没用上、但确实有效的数据
+
+如果这些数字让你觉得「哦，原来还能这么看」，那这个项目的目的就达到了。
+
 ---
 
 ## English
@@ -279,3 +293,19 @@ stateful predictors cannot leak across runs.
 
 See [`docs/`](docs/) for the detailed analyses: the 2026 regulation-year evaluation and a
 like-for-like benchmark against a comparable open-source project.
+
+### About & feedback
+
+This is a **personal hobby project** — built in spare time, with no team behind it and no
+product ambitions. It started from one plain question: *how predictable are F1 race results,
+really?*
+
+Precisely because it is a hobby project, there is plenty I have not seen. **If you spot a bug,
+a data-semantics mistake, or a better approach, please open an issue** — and feel free to tell
+me where my reasoning is wrong. The three things I would most like to hear about:
+
+- **Data semantics** — a `status` misclassified, or a field whose meaning I got backwards
+- **Methodological flaws** — a feature that actually leaks future information, or a test used badly
+- **Better predictive signals** — data that works but that I have not used
+
+If these numbers made you think "huh, I hadn't looked at it that way", the project has done its job.
