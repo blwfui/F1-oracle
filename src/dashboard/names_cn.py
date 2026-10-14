@@ -108,13 +108,32 @@ LAST_NAME_CN = {
     "yamamoto": "山本", "yamashita": "山下",
     "young": "杨", "zhou": "周",
     "zhu": "朱",
+    # 补漏（全库扫描出的未命中者；vettel 是其中比赛最多的一位）
+    "vettel": "维特尔", "ericsson": "埃里克森", "dennis": "丹尼斯",
+    "vries": "德弗里斯", "gelael": "格拉尔", "ilott": "伊洛特",
+    "nissany": "尼萨尼", "o'sullivan": "奥沙利文", "palou": "帕劳",
 }
+
+
+# 重音字母转写表 —— 必须在剥离非 ASCII 之前做，否则会把字母整个删掉：
+#   "Pérez" → "Prez"（错）  应为 "Perez"
+#   "Räikkönen" → "Rikknen"（错）  应为 "Raikkonen"
+# 姓氏表里存的是无重音形式（perez / raikkonen），所以转写后就能命中。
+_ACCENTS = str.maketrans({
+    "á": "a", "à": "a", "â": "a", "ä": "a", "ã": "a", "å": "a", "ā": "a",
+    "é": "e", "è": "e", "ê": "e", "ë": "e", "ē": "e",
+    "í": "i", "ì": "i", "î": "i", "ï": "i", "ī": "i",
+    "ó": "o", "ò": "o", "ô": "o", "ö": "o", "õ": "o", "ø": "o", "ō": "o",
+    "ú": "u", "ù": "u", "û": "u", "ü": "u", "ū": "u",
+    "ñ": "n", "ç": "c", "ý": "y", "ÿ": "y", "š": "s", "ž": "z",
+    "ł": "l", "đ": "d", "ß": "ss", "æ": "ae", "œ": "oe",
+})
 
 
 def _clean_name(name):
     if not name:
         return ""
-    return re.sub(r"[^a-z\s\-'\.]", "", str(name).lower()).strip()
+    return re.sub(r"[^a-z\s\-'\.]", "", str(name).lower().translate(_ACCENTS)).strip()
 
 
 def auto_cn_short(code, full_name):
