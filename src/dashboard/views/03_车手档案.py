@@ -76,7 +76,7 @@ def render(year):
                 bg = "rgba(200,0,0,0.06)"
             else:
                 bg = "#fff"
-            if sts_raw != "Finished" and not sts_raw.startswith("+"):
+            if is_dnf(sts_raw):
                 bg = "rgba(200,0,0,0.12)"
             rows += f"""<tr style="background:{bg};">
                 <td style="text-align:center;padding:6px 8px;">{r['站']}</td>

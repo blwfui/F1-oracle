@@ -24,10 +24,13 @@ def render(year):
             from ai_chat import generate_track_guide
 
             with st.spinner("AI 正在分析历史数据…"):
+                # 只取完赛者：退赛者的 position 是按行驶距离分配的分类名次，
+                # 拿它算「位置变化」会得出「退赛=掉 6.8 位」的假信号。
+                # 注意不能用 `position IS NOT NULL` —— position 永不为 NULL，那样等于没过滤。
                 guide_overtaking = query(f"""
                     SELECT r.year, r.round, r.driver, r.full_name, r.team, r.grid, r.position
                     FROM results r JOIN events e USING(year, round)
-                    WHERE e.location='{selected_track}' AND r.position IS NOT NULL
+                    WHERE e.location='{selected_track}' AND {FINISHED_SQL}
                         AND r.grid > 0 AND e.round > 0
                     ORDER BY r.year, r.round
                 """)
@@ -60,7 +63,7 @@ def render(year):
                 guide_dnf = query(f"""
                     SELECT r.year, r.status, COUNT(*) as count
                     FROM results r JOIN events e USING(year, round)
-                    WHERE e.location='{selected_track}' AND r.status != 'Finished'
+                    WHERE e.location='{selected_track}' AND {DNF_SQL}
                         AND e.round > 0
                     GROUP BY r.year, r.status
                     ORDER BY count DESC
@@ -91,7 +94,8 @@ def render(year):
             rows = ""
             for _, r in track_res.iterrows():
                 pos = r["position"]
-                finished = str(r["status"]) == "Finished"
+                # 被套圈完赛（Lapped / +n Laps）同样算完赛
+                finished = is_finished(r["status"])
                 pdm = int(pos) if pd.notna(pos) else 99
                 if pdm == 1:
                     bd = "#FFD700"

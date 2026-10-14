@@ -13,9 +13,36 @@ from names_cn import auto_cn_short, auto_cn_full
 
 DB_PATH = Path(__file__).resolve().parent.parent.parent / "data" / "f1_oracle.db"
 
+
+# 完赛/退赛 + position 语义的【唯一定义】在 src/semantics.py。
+# 那个模块不依赖任何第三方库，dashboard / etl / model 三层共用；
+# 这里只做转出（本模块 import streamlit，不适合被模型层引用）。
+import sys as _sys
+from pathlib import Path as _Path
+
+_SRC_DIR = _Path(__file__).resolve().parent.parent
+if str(_SRC_DIR) not in _sys.path:
+    _sys.path.insert(0, str(_SRC_DIR))
+
+from semantics import (  # noqa: E402
+    DNF_SQL,
+    FINISHED_SQL,
+    FINISHED_STATUSES,
+    is_dnf,
+    is_finished,
+)
+
+
+# results.position 永不为 NULL、退赛者的 position 是「分类名次」而非完赛名次
+# 等语义说明，见 src/semantics.py。
+
+
 __all__ = [
     # Database
     "query", "_query_stats",
+
+    # Semantics — 完赛/退赛判定（唯一定义）
+    "FINISHED_STATUSES", "FINISHED_SQL", "DNF_SQL", "is_finished", "is_dnf",
 
     # Modules
     "pd", "np",
@@ -183,9 +210,12 @@ TEAM_CN = {
     "McLaren": "McLaren 迈凯伦", "Ferrari": "Ferrari 法拉利",
     "Red Bull Racing": "Red Bull 红牛", "Mercedes": "Mercedes 梅赛德斯",
     "Aston Martin": "Aston Martin 阿斯顿马丁", "Alpine": "Alpine 阿尔派",
-    "Haas F1 Team": "Haas 哈斯", "Racing Bulls": "Racing Bulls 小红牛",
+    "Haas F1 Team": "Haas 哈斯",     "Racing Bulls": "Racing Bulls 小红牛",
     "Williams": "Williams 威廉姆斯", "Kick Sauber": "Kick Sauber 索伯",
     "Sauber": "Sauber 索伯",
+    # 2026 新规年新增/更名
+    "Audi": "Audi 奥迪",            # 接手 Sauber，2026 起以厂队身份参赛
+    "Cadillac": "Cadillac 凯迪拉克",  # 2026 第 11 支车队，通用汽车厂队
     "Alfa Romeo": "Alfa Romeo 阿尔法罗密欧", "AlphaTauri": "AlphaTauri 小红牛",
     "Racing Point": "Racing Point 赛点", "Renault": "Renault 雷诺",
     "Toro Rosso": "Toro Rosso 小红牛",
@@ -288,6 +318,8 @@ TEAM_COLORS = {
     "Williams": "#41B6E6", "Haas F1 Team": "#B6BABD",
     "Racing Bulls": "#A8C0E0", "Kick Sauber": "#00E701",
     "Sauber": "#00E701",
+    # 2026 新规年：Audi 沿用索伯的绿，Cadillac 用品牌黑金
+    "Audi": "#00E701", "Cadillac": "#C8B273",
     "Alfa Romeo": "#800020", "AlphaTauri": "#1E3A5F",
     "Racing Point": "#F596C8", "Renault": "#FFF500",
     "Toro Rosso": "#1E3A5F",

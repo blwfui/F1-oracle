@@ -8,6 +8,8 @@ import pandas as pd
 import streamlit as st
 from openai import OpenAI
 
+from common import DNF_SQL, FINISHED_SQL, is_dnf, is_finished
+
 DB_PATH = Path(__file__).resolve().parent.parent.parent / "data" / "f1_oracle.db"
 
 # ═══════════════════════════════════════════════════════════
@@ -46,10 +48,10 @@ SCHEMA_PROMPT = """你是 F1 Oracle，一个专为一级方程式赛车数据设
 | driver | TEXT | 车手缩写，如 VER, HAM, LEC |
 | full_name | TEXT | 车手全名 |
 | team | TEXT | 车队英文名 |
-| position | INTEGER | 完赛名次 (1=冠军, NULL=退赛未排名) |
+| position | INTEGER | 名次 (1=冠军)。**永不为 NULL** —— 退赛者也有按行驶距离分配的分类名次（11–20）。判退赛只能用 status |
 | grid | INTEGER | 发车位 |
 | points | REAL | 正赛积分 |
-| status | TEXT | 状态，如 Finished, Retired, Collision |
+| status | TEXT | 状态。`Finished`=领先圈完赛；`Lapped` / `+1 Lap` / `+2 Laps`=被套圈完赛（**同样算完赛**）；`Retired` / `Collision` / `Engine` / `Disqualified` / `Did not start` 等=退赛 |
 | laps_completed | INTEGER | 完成圈数 |
 | race_time_sec | REAL | 比赛用时（秒） |
 | q1_sec | REAL | Q1 最快圈秒数 |
@@ -75,6 +77,9 @@ SCHEMA_PROMPT = """你是 F1 Oracle，一个专为一级方程式赛车数据设
 | is_pit | INTEGER | 是否进站圈 (1=是) |
 | is_best | INTEGER | 是否个人最快圈 (1=是) |
 | speed_fl | REAL | 终点线速度 (km/h) |
+| time_sec | REAL | 该圈完成时刻的【会话累计时间】(秒)。⚠️ 含赛前等待，绝对值无意义；**两车秒差 = 同圈同站两人 time_sec 之差** |
+| lap_start_sec | REAL | 该圈开始时刻 (秒，同为会话累计) |
+| track_status | TEXT | 赛道状态标志串：1=绿旗 2=黄旗 4=安全车 5=红旗 6=虚拟安全车（多标志连写，如 "12"） |
 
 ### weather — 天气
 | 列 | 类型 | 说明 |
@@ -143,11 +148,31 @@ SCHEMA_PROMPT = """你是 F1 Oracle，一个专为一级方程式赛车数据设
 4. **赛道/分站** 通过 events 表的 event_name, location, country 匹配。
 5. **积分计算**：总积分 = results.points + sprint_points.points（需要 LEFT JOIN 或子查询）。如果用户问"总积分"或"积分榜"，必须包含冲刺赛积分。
 6. **领奖台** = position <= 3（正赛名次 ≤ 3）。
-7. **完赛率** = status='Finished' 的场次 / 总参赛场次。
+7. **完赛 / 退赛的判定（极易出错，必须照此写法）**
+   - 完赛 = `{FINISHED_SQL}`
+     即 status 为 `Finished`、`Lapped`、`+n Laps` 三者之一。
+     `Lapped` 和 `+n Laps` 是【被套圈完赛】，仍然算完赛，不是退赛。
+   - 退赛 = `{DNF_SQL}`
+   - ❌ 绝对不要写 `status='Finished'` 或 `status!='Finished'` 来判断完赛/退赛：
+     实测会把完赛率从 **85.1% 误压到 57.7%**，各年偏差 15.9–39.0 个百分点。
+   - **完赛率** = 完赛场次 / 总参赛场次，SQL 写法：
+         SUM(CASE WHEN {FINISHED_SQL} THEN 1 ELSE 0 END) * 1.0 / COUNT(*)
+   - **退赛次数** = `SUM(CASE WHEN {DNF_SQL} THEN 1 ELSE 0 END)`
+   - ❌ 也不要写 `position IS NULL` 来筛退赛：实测 **3458 行 position 全部非空**，
+     该条件永远不成立，查询必然返回空表。退赛者同样有 position
+     （按行驶距离分配的分类名次，范围 11–20）。筛退赛只能用上面的 `{DNF_SQL}`。
 8. **进站次数** 通过 laps 表 is_pit=1 统计。
 9. **SQLite 语法**：不支持 TOP，用 LIMIT；字符串用单引号；日期函数用 strftime。
 10. 只返回一条可执行的 SQL 语句，不要多余的解释。
 """
+
+# 把唯一权威的完赛/退赛定义注入 prompt —— 定义改在 common.py，prompt 自动跟着变，
+# 不会再出现"代码改了、prompt 还是旧说法"的漂移。
+SCHEMA_PROMPT = (
+    SCHEMA_PROMPT
+    .replace("{FINISHED_SQL}", FINISHED_SQL)
+    .replace("{DNF_SQL}", DNF_SQL)
+)
 
 # ═══════════════════════════════════════════════════════════
 # Safety check
@@ -341,7 +366,7 @@ CHART_SYSTEM_PROMPT = """你是 F1 数据可视化助手。用户用中文描述
 | driver | 车手缩写 TEXT，如 'VER', 'HAM' |
 | full_name | 车手全名 TEXT |
 | team | 车队英文名 TEXT |
-| position | 完赛名次 (INTEGER, NULL=退赛) |
+| position | 名次 INTEGER，**永不为 NULL**（退赛者也有分类名次）。判退赛用 status，不要用 position 判空 |
 | grid | 发车位 (INTEGER) |
 | points | 正赛积分 (REAL) |
 | status | 状态 TEXT |
@@ -493,15 +518,18 @@ def generate_race_report(year: int, round_num: int, event_name: str, race_data: 
     if res is not None and not res.empty:
         parts.append("\n正赛成绩（前10名）：")
         for _, r in res.head(10).iterrows():
-            pos = int(r["position"]) if pd.notna(r["position"]) else "DNF"
+            # position 永不为 NULL（退赛者也有分类名次），故无需判空；
+            # 是否退赛看本行末尾的 status
+            pos = int(r["position"])
             pts = r.get("points", 0)
             grid = int(r["grid"]) if pd.notna(r.get("grid")) else "?"
             status = r.get("status", "")
             parts.append(f"  P{pos} {r['full_name']} ({r['team']}) — "
                          f"发车P{grid}, 积分{pts}, {status}")
 
-        # DNF summary
-        dnfs = res[res["status"] != "Finished"]
+        # DNF summary —— 用 is_dnf 而非 status!='Finished'，
+        # 否则被套圈完赛（Lapped / +n Laps）会被误列为退赛
+        dnfs = res[res["status"].apply(is_dnf)]
         if not dnfs.empty:
             parts.append(f"\n退赛 {len(dnfs)} 人：")
             for _, r in dnfs.iterrows():
@@ -674,9 +702,11 @@ def generate_strategy_analysis(year: int, round_num: int, event_name: str,
     if res is not None and not res.empty:
         parts.append("\n正赛成绩（前10）：")
         for _, r in res.head(10).iterrows():
-            pos = int(r["position"]) if pd.notna(r["position"]) else "DNF"
+            # position 永不为 NULL。位置变化只对完赛者有定义：
+            # 退赛者的 position 是按行驶距离分配的分类名次，不是「掉了几位」
+            pos = int(r["position"])
             grid = int(r["grid"]) if pd.notna(r.get("grid")) else "?"
-            gain = int(grid) - int(pos) if pd.notna(r.get("grid")) and pd.notna(r["position"]) else 0
+            gain = (int(grid) - pos) if isinstance(grid, int) and is_finished(r["status"]) else 0
             gain_str = f"↑{gain}" if gain > 0 else (f"↓{abs(gain)}" if gain < 0 else "→")
             parts.append(f"  P{pos} {r['full_name']} ({r['team']}) — "
                          f"发车P{grid} {gain_str}, 积分{r.get('points', 0)}")

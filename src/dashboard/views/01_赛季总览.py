@@ -78,7 +78,7 @@ def render(year):
             """)
             review_stats = query(f"""
                 SELECT r.driver, r.team,
-                       SUM(CASE WHEN r.status != 'Finished' THEN 1 ELSE 0 END) as dnf_count,
+                       SUM(CASE WHEN {DNF_SQL} THEN 1 ELSE 0 END) as dnf_count,
                        ROUND(AVG(r.grid), 1) as avg_grid,
                        ROUND(AVG(r.position), 1) as avg_fin
                 FROM results r WHERE r.year={year}

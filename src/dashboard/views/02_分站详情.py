@@ -268,7 +268,8 @@ def render(year):
     rows = ""
     for _, r in res.iterrows():
         pos = r["position"]
-        finished = str(r["status"]) == "Finished"
+        # 被套圈完赛（Lapped / +n Laps）同样算完赛，不能只判 'Finished'
+        finished = is_finished(r["status"])
         pdm = int(pos) if pd.notna(pos) else 99
         if pdm == 1:
             bd = "#FFD700"
