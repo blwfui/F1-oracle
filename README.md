@@ -111,6 +111,19 @@ api_key = "sk-..."
 model = "deepseek-chat"
 ```
 
+### 逐圈回放动画
+
+把**任意一场**导出成一个能独立播放的 HTML —— 赛道俯视图、每台车逐圈移动、
+右侧实时排行榜、进站动画（拐进维修区 → 停在车位 → 换胎闪光）。约 200 KB，
+数据全部内联，不联网、无依赖，双击就能放。
+
+```bash
+python -m scripts.export_replay 2023 3     # 2023 年第 3 站（轮次，不是赛道名）
+```
+
+`outputs/` 是生成物，不入库。**生成步骤、维修区几何怎么抽、「换成你自己的赛季 / 赛道 / 语言」
+改哪里，见 [回放动画指南](docs/replay-guide.md)。**
+
 ### 项目结构
 
 ```
@@ -120,7 +133,7 @@ src/
   model/            预测层：回测框架 / 预测器库 / 逐圈分析 / 脏圈识别
   dashboard/        Streamlit 界面，六个页面
 scripts/            回测、导入、评估、演示等命令行工具
-docs/               评估报告与对标分析
+docs/               评估报告、对标分析与回放动画指南
 ```
 
 `src/model/` 的防泄漏是**结构性**的：`make_context()` 按预测时点（`pre_quali` / `post_quali`）
@@ -291,6 +304,21 @@ api_key = "sk-..."
 model = "deepseek-chat"
 ```
 
+### Lap-by-lap replay
+
+Export **any race** into a single self-contained, playable HTML file — a top-down circuit with
+every car moving lap by lap, a live timing tower, and a pit-stop animation (peel into the pit
+lane → stop at the box → tyre-change flash). ~200 KB, all data inlined; no network, no
+dependencies, just open it.
+
+```bash
+python -m scripts.export_replay 2023 3     # 2023, round 3 (round number, not a circuit name)
+```
+
+`outputs/` holds generated artefacts and is git-ignored. **For the generation steps, how the
+pit-lane geometry is extracted, and which knobs to turn to swap in your own season / circuit /
+language, see the [replay guide](docs/replay-guide.md).**
+
 ### Layout
 
 ```
@@ -300,7 +328,7 @@ src/
   model/            prediction layer: backtest framework / predictors / lap analysis / dirty-lap detection
   dashboard/        Streamlit UI, six pages
 scripts/            backtest, ingest, evaluation and demo CLIs
-docs/               evaluation reports and benchmark analyses
+docs/               evaluation reports, benchmark analyses and the replay guide
 ```
 
 Leakage prevention in `src/model/` is **structural**: `make_context()` decides which fields
