@@ -1,5 +1,17 @@
 """回填 laps 表的时间轴字段：time_sec / lap_start_sec / track_status。
 
+待办判据（2026-10-15 修）
+------------------------
+原判据是「laps 里存在 `time_sec IS NULL` 的行」，两头都错：
+  · **2018 R14（Monza）在 laps 里一行都没有** → 永远进不了队列，于是永远补不上；
+  · 有几场各只有 1 行 NULL → **每次运行都重抓整场**，永不收敛。
+现在以 `results` 为准枚举轮次，只把「完全没有圈速行」或「NULL 占比 > 10%」的入队。
+
+⚠️ 2018 R14 是**补不回来的**：FastF1 加载该场计时数据时内部抛
+`IndexError: list index out of range`（上游解析失败，报 `Failed to load timing data!`
+后静默留下未加载的 laps）。这不是本项目的缺陷，本脚本每次都会正确点名它 ——
+别去追这个，等上游修。
+
 背景
 ----
 原 ETL 把 laps 当成「每圈一行」来存，丢了时间轴 —— 只有 lap_time（单圈耗时），
@@ -82,15 +94,39 @@ def ensure_columns(db: sqlite3.Connection) -> list[str]:
 
 
 def pending_races(db: sqlite3.Connection, year: int | None) -> list[tuple[int, int]]:
-    """找出 time_sec 尚未回填的 (year, round)。"""
-    sql = ("SELECT DISTINCT year, round FROM laps "
-           "WHERE time_sec IS NULL")
+    """待回填的 (year, round)。
+
+    ⚠️ 原判据只有「laps 里存在 time_sec IS NULL 的行」，两头都错：
+
+      · **2018 R14（Monza）在 laps 里一行都没有** —— 永远进不了队列，于是永远补不上
+        （实测：results 覆盖 190 轮，laps 只覆盖 189 轮，缺的正是这一站）；
+      · 反过来，有几场各只有 1 行 NULL，**每次运行都会重抓整场**，永不收敛。
+
+    改成以 `results` 为准枚举所有轮次：**完全没有圈速行**、或 **NULL 占比 > 10%**
+    的才入队。一两行的噪声不再触发整场重抓。
+    """
+    sql = """
+    SELECT r.year, r.round,
+           (SELECT COUNT(*) FROM laps l
+             WHERE l.year = r.year AND l.round = r.round) AS n,
+           (SELECT COUNT(*) FROM laps l
+             WHERE l.year = r.year AND l.round = r.round
+               AND l.time_sec IS NOT NULL) AS ok
+      FROM (SELECT DISTINCT year, round FROM results WHERE round > 0) r
+    """
     params: list = []
     if year is not None:
-        sql += " AND year = ?"
+        sql = (sql.replace("WHERE round > 0) r",
+                           "WHERE round > 0 AND year = ?) r"))
         params.append(year)
-    sql += " ORDER BY year, round"
-    return [(int(y), int(r)) for y, r in db.execute(sql, params)]
+    sql += " ORDER BY r.year, r.round"
+
+    out = []
+    for y, r, n, ok in db.execute(sql, params):
+        n, ok = int(n), int(ok)
+        if n == 0 or (n - ok) / n > 0.10:
+            out.append((int(y), int(r)))
+    return out
 
 
 def coverage(db: sqlite3.Connection) -> None:

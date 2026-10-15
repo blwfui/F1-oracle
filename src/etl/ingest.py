@@ -30,8 +30,27 @@ END_YEAR = datetime.date.today().year
 def _connect():
     db = sqlite3.connect(str(DB_PATH))
     db.execute("PRAGMA journal_mode=WAL")
+    db.execute("PRAGMA busy_timeout=10000")
     db.execute("PRAGMA foreign_keys=OFF")
     return db
+
+
+# 记录「这次到底怎么了」，让调用方分得清两种情况：
+#   SKIPPED —— 赛季里**根本没有这个会话**（冲刺周末没有 FP3、测试日没有正赛），正常
+#   FAILED  —— 网络/解析等真失败，必须让调用方看见（以前它们都被 log.warning 后
+#              静默 return，调用方无从区分，于是"数据莫名少了几轮"）
+SKIPPED: list[str] = []
+FAILED: list[str] = []
+
+
+def _note_skip(year: int, rn: int, sess: str, e: Exception) -> None:
+    tag = f"{year} R{rn} {sess}"
+    if isinstance(e, (ValueError, KeyError)):
+        SKIPPED.append(tag)
+        log.info("    跳过 %s：赛季里没有这个会话", tag)
+    else:
+        FAILED.append(f"{tag}: {type(e).__name__}: {e}")
+        log.warning("    **失败** %s：%s: %s", tag, type(e).__name__, e)
 
 
 def init_db():
@@ -103,7 +122,7 @@ def ingest_session(db, year, round_number, session_type):
         s = fastf1.get_session(year, round_number, session_type)
         s.load(telemetry=False, laps=True, weather=False, messages=False)
     except Exception as e:
-        log.warning("  Skip %s R%d: %s", session_type, round_number, e)
+        _note_skip(year, round_number, session_type, e)
         return
     lp = s.laps
     if lp is None or lp.empty:
@@ -150,7 +169,7 @@ def ingest_qualifying(db, year, round_number):
         session = fastf1.get_session(year, round_number, "Q")
         session.load(telemetry=False, laps=False, weather=False, messages=False)
     except Exception as e:
-        log.warning("  Skip Q%d: %s", round_number, e)
+        _note_skip(year, round_number, "Q", e)
         return
 
     res = session.results
@@ -182,7 +201,7 @@ def ingest_race(db, year, round_number):
         session = fastf1.get_session(year, round_number, "R")
         session.load(telemetry=False, laps=True, weather=True, messages=False)
     except Exception as e:
-        log.warning("  Skip R%d: %s", round_number, e)
+        _note_skip(year, round_number, "R", e)
         return
 
     # --- results (compute positions from laps if API results are NaN) ---
@@ -216,8 +235,12 @@ def ingest_race(db, year, round_number):
             fastest = laps_df.pick_fastest()
             if fastest is not None:
                 fastest_lap_driver = str(fastest["Driver"])
-        except Exception:
-            pass
+        except Exception as e:                        # noqa: BLE001
+            # 拿不到最快圈 → 该年规则下会少那 1 分。绝不能静默：记一笔。
+            FAILED.append(f"{year} R{round_number} 最快圈识别: "
+                          f"{type(e).__name__}: {e}")
+            log.warning("    R%d: 最快圈识别失败（%s），本场不做最快圈记分",
+                        round_number, type(e).__name__)
 
     all_drivers = set(list(status_map.keys()) + list(positions_from_laps.keys()))
     result_rows = []
@@ -251,7 +274,10 @@ def ingest_race(db, year, round_number):
     # --- laps ---
     try:
         lp = session.laps
-    except Exception:
+    except Exception as e:                        # noqa: BLE001
+        FAILED.append(f"{year} R{round_number} laps: {type(e).__name__}: {e}")
+        log.warning("    R%d: 圈速读取失败（%s），该轮将没有圈速",
+                    round_number, type(e).__name__)
         lp = None
     if lp is not None and not lp.empty:
         lap_rows = []
@@ -350,7 +376,15 @@ def run(years=None):
 
     db.close()
     log.info("ETL complete. DB: %s", DB_PATH)
+    if SKIPPED:
+        log.info("跳过的会话 %d 个（赛季里没有该会话，正常）", len(SKIPPED))
+    if FAILED:
+        log.error("**失败 %d 处**（这些不是「没数据」，是真出错）：", len(FAILED))
+        for item in FAILED[:10]:
+            log.error("  %s", item)
+    return len(FAILED)
 
 
 if __name__ == "__main__":
-    run()
+    # 有真失败就非零退出 —— 以前一律退出 0，调度方看不出这次导入是残的
+    raise SystemExit(1 if run() else 0)

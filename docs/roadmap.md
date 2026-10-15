@@ -15,7 +15,9 @@
 | 冲刺积分 sprint_points | N/A | N/A | N/A | ✓ | ✓ | ✓ | ✓ | ✓ |
 | 冲刺 SQ 排位 sq_pos | N/A | N/A | N/A | ✓ | ✓ | ✓ | ✓ | ✓ |
 
-> \* 2018 R14 赫根海姆圈速缺（FastF1 `__fix_tyre_info` bug）
+> \* 2018 R14 **蒙扎（Monza）** 圈速缺 —— 是 **FastF1 加载该场计时数据时内部抛
+> `IndexError: list index out of range`**（上游解析失败），不是本项目的缺陷。
+> 站点名与归因都已更正：R14 是 Monza，赫根海姆是 R11；原因也不是 `__fix_tyre_info`。
 
 ### 冲刺赛覆盖
 
@@ -31,7 +33,7 @@
 
 | 缺口 | 原因 |
 |------|------|
-| 2018 R14 圈速 | FastF1 bug |
+| 2018 R14（Monza）圈速 | FastF1 上游解析失败（`IndexError`） |
 | 2019 R17 FP3 | 台风海贝思取消 |
 | 2020 R02 FP3 | API 无可用数据 |
 | 2020 R11 FP1/FP2 | 大雾取消 |
@@ -68,7 +70,8 @@
 ### 数据
 
 - [ ] 进站数据分析（FastF1 pit stop 数据）
-- [ ] 2018 R14 圈速补录（等 FastF1 修复 __fix_tyre_info bug）
+- [ ] 2018 R14（Monza）圈速补录 —— 卡在 FastF1 上游（加载计时数据抛 `IndexError`），
+      不是本项目可修的；`scripts/backfill_lap_times.py` 每次都会正确点名它
 
 ### 新页面
 
@@ -89,6 +92,7 @@
 ## 技术栈
 
 - **数据**: FastF1 API（练习/圈速/轮胎/天气）+ Jolpi/Ergast API（排位/积分修正）
-- **存储**: SQLite WAL 模式，7 张表
+- **存储**: SQLite WAL 模式，9 张表（circuits / circuit_aliases / events / results /
+  laps / weather / sessions / sprint_points / driver_names）
 - **仪表板**: Streamlit + Plotly，F1 红色主题，全中文
 - **依赖**: fastf1, pandas, numpy, streamlit, plotly, requests, pyarrow

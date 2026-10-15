@@ -37,10 +37,27 @@ logging.getLogger("_api").setLevel(logging.WARNING)
 
 FP_TYPES = ("FP1", "FP2", "FP3")
 
-# 一轮算「已完成」的最低门槛（22 车阵容下的宽松下界）
-MIN_RESULTS = 18
+# 一轮算「已完成」的兜底门槛（只在拿不到赛季阵容规模时才用）
+MIN_RESULTS_FALLBACK = 18
 MIN_QUALI = 15
 MIN_LAPS = 100
+
+
+def expected_entrants(db, year):
+    """该赛季的阵容规模 = 各轮 results 行数的最大值。
+
+    ⚠️ 原来这里是一个写死的 `MIN_RESULTS = 18`，判据是"人数够多就算完整"而不是
+    "应到多少"，于是**实测 2024 R3 与 2025 R9 各只有 19 人（赛季内其余轮都是 20）
+    却被判「已完整」而跳过**。改成拿赛季内最大值当期望，这两轮就会被正确点名；
+    其余轮次不受影响（实测不会误伤）。
+
+    局限：如果某站确实少人（车队临时撤车之类），会被**持续**标为覆盖不足。
+    这是刻意的取舍 —— 宁可吵，也不要静默地少一个车手。
+    """
+    row = db.execute(
+        "SELECT MAX(c) FROM (SELECT COUNT(*) AS c FROM results"
+        " WHERE year=? AND round>0 GROUP BY round)", (year,)).fetchone()
+    return int(row[0]) if row and row[0] else 0
 
 
 def _connect():
@@ -71,8 +88,10 @@ def coverage(db, year, rn):
     }
 
 
-def is_done(cov):
-    return (cov["res"] >= MIN_RESULTS and cov["quali"] >= MIN_QUALI
+def is_done(cov, expected=0):
+    """一轮是否已完整。expected = 该赛季阵容规模（见 expected_entrants）。"""
+    need = expected or MIN_RESULTS_FALLBACK
+    return (cov["res"] >= need and cov["quali"] >= MIN_QUALI
             and cov["fp"] >= 1 and cov["laps"] >= MIN_LAPS)
 
 
@@ -138,8 +157,10 @@ def main():
               f"空库请先跑 python -m src.etl.ingest", file=sys.stderr, flush=True)
         sys.exit(1)
 
+    expect = expected_entrants(db, year)
     print(f"[{year}] 待处理 {len(rounds)} 轮："
-          f"R{rounds[0][0]}–R{rounds[-1][0]}", flush=True)
+          f"R{rounds[0][0]}–R{rounds[-1][0]}　（阵容规模 {expect} 人，"
+          f"低于此数即判覆盖不足）", flush=True)
     print("-" * 78, flush=True)
 
     t_all = time.perf_counter()
@@ -147,7 +168,7 @@ def main():
     failed = []
     for i, (rn, name, loc, dt) in enumerate(rounds, 1):
         cov = coverage(db, year, rn)
-        if is_done(cov) and not args.force:
+        if is_done(cov, expect) and not args.force:
             skipped += 1
             print(f"[{i:2}/{len(rounds)}] R{rn:<2} {loc:<20} 已完整，跳过 "
                   f"(res={cov['res']} q={cov['quali']} fp={cov['fp']} lap={cov['laps']})",
@@ -157,21 +178,24 @@ def main():
         print(f"[{i:2}/{len(rounds)}] R{rn:<2} {loc:<20} {dt}  导入中...", flush=True)
         step = import_round(db, year, rn)
         cov = coverage(db, year, rn)
-        flag = "OK " if is_done(cov) else "!! "
+        flag = "OK " if is_done(cov, expect) else "!! "
         print(f"          {flag}{step['secs']:5.1f}s  "
               f"res={cov['res']:>2} q={cov['quali']:>2} fp={cov['fp']} lap={cov['laps']:>4}"
               f"   [R={step['R']} Q={step['Q']} FP={step['FP']}]", flush=True)
-        if not is_done(cov):
-            failed.append((rn, cov))
+        if not is_done(cov, expect):
+            failed.append((rn, cov, expect))
 
     dur = time.perf_counter() - t_all
     print("-" * 78, flush=True)
     print(f"完成：{len(rounds) - skipped} 轮导入 / {skipped} 轮跳过 / 耗时 {dur/60:.1f} 分钟",
           flush=True)
     if failed:
-        print("⚠️ 覆盖不足的轮次：", flush=True)
-        for rn, cov in failed:
-            print(f"   R{rn}: {cov}", flush=True)
+        print("⚠️ 覆盖不足的轮次（应到 %d 人）：" % failed[0][2], flush=True)
+        for rn, cov, _ in failed:
+            print(f"   R{rn}: res={cov['res']} q={cov['quali']} "
+                  f"fp={cov['fp']} lap={cov['laps']}", flush=True)
+        print("   → 若源头确实少人（车队临时撤车），属正常，但请人工确认一次。",
+              flush=True)
     db.close()
     # 有轮次覆盖不足就非零退出 —— 以前一律返回 0，调度方看不出这次导入是残的
     if failed:

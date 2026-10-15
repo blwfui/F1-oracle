@@ -1,45 +1,53 @@
 """Import practice sessions, sprint qualifying, and qualifying data for a given year.
-Usage: python scripts/import_sessions.py <year> [fp|sq|q|all]
+Usage: python -m scripts.import_sessions <year> [fp|sq|q|all]
 
-Replaces import_2018.py ~ import_2024_fp.py.
-2025 has its own self-check loop (import_2025.py).
+⚠️ 顺序：`sq` 依赖 sprint_points 里已经有该轮的**行**（它只 UPDATE `sq_pos`），
+   所以新赛季要先跑 `python -m scripts.build_sprint <year>`。
 """
 
 import sys
-import sqlite3
 import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
-DB_PATH = ROOT / "data" / "f1_oracle.db"
+
+from src.etl.db import CACHE_DIR, connect as _connect  # noqa: E402
 
 FP_TYPES = ("FP1", "FP2", "FP3")
 
-
-def _connect():
-    db = sqlite3.connect(str(DB_PATH))
-    db.execute("PRAGMA journal_mode=WAL")
-    return db
+# 任一步骤失败就把退出码置为 1 —— 以前一律返回 0，调度方看不出这次导入是残的
+FAILURES = 0
 
 
-def _get_sprint_rounds(year):
-    """Detect sprint rounds from the events table."""
+def sprint_rounds(year):
+    """冲刺轮次：从赛历派生（FastF1 的 EventFormat），不再维护写死的轮次表。
+
+    旧实现优先读库里的 sprint_points，读不到就查一张只到 2024 的硬编码表 ——
+    于是 2025/2026 恒为空集，SQ 静默跳过。
+    """
+    try:
+        import fastf1
+        fastf1.Cache.enable_cache(str(CACHE_DIR))
+        sch = fastf1.get_event_schedule(year, include_testing=False)
+        out = set()
+        for _, ev in sch.iterrows():
+            rn = int(ev["RoundNumber"])
+            if rn <= 0:
+                continue
+            fmt = str(ev.get("EventFormat", "")).lower()
+            sessions = [str(ev.get(f"Session{i}", "")).strip() for i in range(1, 6)]
+            if "sprint" in fmt or "Sprint" in sessions:
+                out.add(rn)
+        if out:
+            return out
+    except Exception as e:                            # noqa: BLE001
+        print(f"  （赛历读取失败，回退到库里的 sprint_points：{e}）", file=sys.stderr)
     db = _connect()
     rows = db.execute(
-        "SELECT DISTINCT round FROM sprint_points WHERE year=?", (year,)
-    ).fetchall()
+        "SELECT DISTINCT round FROM sprint_points WHERE year=?", (year,)).fetchall()
     db.close()
-    if rows:
-        return {r[0] for r in rows}
-    # Fallback: known sprint rounds by year
-    fallback = {
-        2021: {10, 12, 19},
-        2022: {4, 11, 21},
-        2023: {4, 9, 12, 17, 18, 20},
-        2024: {5, 6, 11, 19, 21, 23},
-    }
-    return fallback.get(year, set())
+    return {r[0] for r in rows}
 
 
 # ── Practice Sessions ──────────────────────────────────────────────
@@ -66,8 +74,10 @@ def import_practice(year):
             try:
                 ingest_session(db, year, rn, st)
                 total += 1
-            except Exception as e:
-                print(f"FAIL: {e}")
+            except Exception as e:                    # noqa: BLE001
+                global FAILURES
+                FAILURES += 1
+                print(f"FAIL: {type(e).__name__}: {e}")
             time.sleep(0.3)
 
     db.close()
@@ -77,56 +87,90 @@ def import_practice(year):
 # ── Sprint Qualifying SQ ───────────────────────────────────────────
 
 def import_sq(year):
-    import fastf1
-    import pandas as pd
-    fastf1.Cache.enable_cache(str(ROOT / "data" / "cache"))
+    """回填冲刺发车位 `sprint_points.sq_pos`。
 
-    sprint_rounds = _get_sprint_rounds(year)
-    if not sprint_rounds:
-        print(f"No sprint rounds found for {year}, skipping SQ")
-        return
+    ⚠️ 修掉的两个 bug（2026-10-15）：
+      · INSERT 有 **4 个占位符却只传了 3 个参数** → sqlite3.ProgrammingError，
+        而它被外层宽 except 吞成一行 "FAIL:" 继续跑 —— 于是 `sq_pos` **永远写不进**，
+        同时第 112 行算出来的 `pos` 根本没被使用。
+      · 入口硬拦 `year > 2024`，2026 的冲刺排位无法导入。
+        加上旧 `_get_sprint_rounds` 的硬编码表只到 2024，2025/2026 恒为空集。
+
+    2021/2022 没有独立的冲刺排位会话：那年冲刺赛的发车位就是**周五排位赛**成绩，
+    所以 `sq_pos` 直接取该轮的 `results.quali_pos`（实测与库里 2021/2022 的
+    既有值 60/60 完全一致）。2023 用 "SS"（Sprint Shootout），2024+ 用 "SQ"。
+    """
+    import fastf1
+    fastf1.Cache.enable_cache(str(CACHE_DIR))
+
+    rounds = sprint_rounds(year)
+    if not rounds:
+        print(f"{year} 没有冲刺轮次，跳过 SQ")
+        return 0
 
     db = _connect()
     total = 0
 
-    for rn in sorted(sprint_rounds):
+    for rn in sorted(rounds):
         print(f"  R{rn} SQ ...", end=" ", flush=True)
         try:
-            # 2023 uses "SS" (Sprint Shootout), 2024+ uses "SQ"
-            session_type = "SS" if year == 2023 else "SQ"
-            s = fastf1.get_session(year, rn, session_type)
-            s.load(telemetry=False, laps=True, weather=False, messages=True)
-            res = s.results
-            if res is None or res.empty:
-                print("no results, skip")
+            if year <= 2022:
+                # 冲刺发车位 = 周五排位赛成绩
+                cur = db.execute(
+                    "UPDATE sprint_points SET sq_pos = ("
+                    "  SELECT q.quali_pos FROM results q WHERE"
+                    "    q.year = sprint_points.year AND q.round = sprint_points.round"
+                    "    AND q.driver COLLATE NOCASE = sprint_points.driver)"
+                    " WHERE year=? AND round=? AND EXISTS ("
+                    "  SELECT 1 FROM results q WHERE q.year = sprint_points.year"
+                    "    AND q.round = sprint_points.round"
+                    "    AND q.driver COLLATE NOCASE = sprint_points.driver"
+                    "    AND q.quali_pos IS NOT NULL)",
+                    (year, rn),
+                )
+            else:
+                import pandas as pd
+                # 2023 用 "SS"（Sprint Shootout），2024+ 用 "SQ"
+                session_type = "SS" if year == 2023 else "SQ"
+                s = fastf1.get_session(year, rn, session_type)
+                s.load(telemetry=False, laps=True, weather=False, messages=True)
+                res = s.results
+                if res is None or res.empty:
+                    print("no results, skip")
+                    continue
+
+                updated = 0
+                for _, r in res.iterrows():
+                    drv = str(r.get("Abbreviation", ""))
+                    if not drv:
+                        continue
+                    pval = r.get("Position")
+                    if pd.isna(pval):
+                        continue
+                    pos = int(float(pval))
+                    cur = db.execute(
+                        "UPDATE sprint_points SET sq_pos=?"
+                        " WHERE year=? AND round=? AND driver COLLATE NOCASE=?",
+                        (pos, year, rn, drv),
+                    )
+                    updated += cur.rowcount
+                db.commit()
+                print(f"{updated} 条 OK")
+                total += updated
+                time.sleep(0.5)
                 continue
 
-            updated = 0
-            for _, r in res.iterrows():
-                drv = str(r.get("Abbreviation", ""))
-                if not drv:
-                    continue
-                pval = r.get("Position")
-                if pd.isna(pval):
-                    continue
-                pos = int(float(pval))
-                db.execute(
-                    "INSERT INTO sprint_points (year, round, driver, position, points, sq_pos)"
-                    " VALUES (?,?,?,NULL,NULL,?)"
-                    " ON CONFLICT(year, round, driver)"
-                    " DO UPDATE SET sq_pos=excluded.sq_pos",
-                    (year, rn, drv),
-                )
-                updated += 1
             db.commit()
-            print(f"{updated} drivers OK")
-            total += updated
-        except Exception as e:
-            print(f"FAIL: {e}")
-        time.sleep(0.5)
+            print(f"{cur.rowcount} 条 OK（口径：周五排位赛）")
+            total += cur.rowcount
+        except Exception as e:                        # noqa: BLE001
+            global FAILURES
+            FAILURES += 1
+            print(f"FAIL: {type(e).__name__}: {e}")
 
     db.close()
     print(f"\nSQ import done. {total} entries updated.")
+    return total
 
 
 # ── Qualifying Q1/Q2/Q3 from Jolpi API ─────────────────────────────
@@ -151,7 +195,7 @@ def import_qualifying(year):
             parts = str(t).split(":")
             if len(parts) == 2:
                 return int(parts[0]) * 60 + float(parts[1])
-        except Exception:
+        except (ValueError, TypeError):
             pass
         return None
 
@@ -190,8 +234,10 @@ def import_qualifying(year):
             db.commit()
             print(f"{len(results)} drivers OK")
             total += len(results)
-        except Exception as e:
-            print(f"FAIL: {e}")
+        except Exception as e:                        # noqa: BLE001
+            global FAILURES
+            FAILURES += 1
+            print(f"FAIL: {type(e).__name__}: {e}")
         time.sleep(0.3)
 
     db.close()
@@ -241,16 +287,19 @@ def show_stats(year):
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("Usage: python scripts/import_sessions.py <year> [fp|sq|q|all]")
-        print("  year: 2018-2024")
+        print("Usage: python -m scripts.import_sessions <year> [fp|sq|q|all]")
+        print("  year: 2018 起")
         print("  step: fp (practice), sq (sprint qualifying), q (qualifying), all (default)")
         sys.exit(1)
 
     year = int(sys.argv[1])
     step = sys.argv[2] if len(sys.argv) > 2 else "all"
 
-    if year < 2018 or year > 2024:
-        print(f"Year {year} out of range. Use 2018-2024 (2025 has its own script).")
+    # 原来硬拦 year > 2024（"2025 has its own script"）—— 那条脚本已经不在了，
+    # 于是 2025/2026 的练习赛与冲刺排位无法用本脚本导入。上界跟着"今年"走。
+    import datetime
+    if year < 2018 or year > datetime.date.today().year:
+        print(f"年份 {year} 超出范围（2018–{datetime.date.today().year}）")
         sys.exit(1)
 
     has_sprint = year >= 2021
@@ -274,4 +323,7 @@ if __name__ == "__main__":
         import_qualifying(year)
 
     show_stats(year)
+    if FAILURES:
+        print(f"\n⚠️ {FAILURES} 个步骤失败", file=sys.stderr)
+        sys.exit(1)
     print("\nDONE")
