@@ -15,6 +15,10 @@ Set-Location $PSScriptRoot
 
 $env:PYTHONPATH = "$PSScriptRoot\src"
 
+# 中文 Windows 的默认代码页是 cp936(gbk)，脚本里的 emoji/中文直接 print 会抛
+# UnicodeEncodeError（run_backtest.py 就崩在自检段第一行）。显式指定 UTF-8。
+$env:PYTHONIOENCODING = "utf-8"
+
 . "$PSScriptRoot\.venv\Scripts\Activate.ps1"
 
 # 用 python -m 启动：把仓库根目录（cwd）放进 sys.path[0]，

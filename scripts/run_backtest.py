@@ -26,14 +26,24 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+# 中文 Windows 的默认代码页是 gbk，而本脚本自检段第一行就含 "✅" ——
+# 于是 print 直接抛 UnicodeEncodeError，**崩在所有显著性检验之前**（后半段完全不执行）。
+# 这里显式兜底：stdout 不是 UTF-8 就换成 UTF-8。见 docs/审查报告-缺点清单.md M8。
+for _s in (sys.stdout, sys.stderr):
+    if _s.encoding and _s.encoding.lower().replace("-", "") not in ("utf8", "utf8mb4"):
+        try:
+            _s.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass  # 被重定向到不支持 reconfigure 的对象时算了
+
 from src.model.backtest import (  # noqa: E402
     format_accuracy, format_table, load_races, make_context, practical_accuracy,
     run_backtest, spearman, summarize,
 )
 from src.model.predictors import (  # noqa: E402
-    AdjustedGridBaseline, CircuitHistoryBaseline, EloPredictor, GridBaseline,
-    PointsBaseline, PracticePaceBaseline, PrevFinishBaseline, QualiGapBaseline,
-    RandomBaseline, RankBlend, best_post, best_pre,
+    AdjustedGridBaseline, AvgFinishBaseline, CircuitHistoryBaseline, EloPredictor,
+    GridBaseline, PointsBaseline, PracticePaceBaseline, PrevFinishBaseline,
+    QualiGapBaseline, RandomBaseline, RankBlend, best_post, best_pre,
 )
 
 CTX_CN = {"pre_quali": "排位赛前（不知道发车格）", "post_quali": "排位赛后（知道发车格）"}
@@ -67,10 +77,23 @@ def penalty_subsets(races) -> tuple[set[str], set[str]]:
 
 
 def l0_predictors() -> list[tuple[str, object]]:
+    """L0 零假设基线。
+
+    ⚠️ 「平均完赛名次」这两条以前**不在**记分板上，而它们才是同复杂度下最强的
+    零拟合基线 —— 实测赛前 ρ=0.5849（仅完赛）/ 0.5623（含退赛），都高于
+    我们一直当对照用的「赛前积分榜」0.5501。只拿最弱的那条当分母，
+    会把提升放大成两倍（+0.0570 vs +0.0222）。对外口径统一为**相对同复杂度基线**。
+
+    另外这两条也是一组干净的对照：同一个信号，只换 `include_dnf` 就差 0.0226，
+    与 Elo 那条 `finishers_only` 的账是同一个机制（退赛的 position 是分类名次，
+    含进来等于把"运气差"当"速度慢"）—— 在不涉及 Elo 的地方也能看到这 0.02。
+    """
     return [
         ("L0 随机（自检用）", lambda: RandomBaseline()),
         ("L0 发车格顺序", lambda: GridBaseline()),
         ("L0 赛前积分榜", lambda: PointsBaseline()),
+        ("L0 平均完赛名次(仅完赛)", lambda: AvgFinishBaseline(include_dnf=False)),
+        ("L0 平均完赛名次(含退赛)", lambda: AvgFinishBaseline(include_dnf=True)),
         ("L0 上一站名次", lambda: PrevFinishBaseline()),
         ("L0 该赛道历史名次", lambda: CircuitHistoryBaseline()),
     ]

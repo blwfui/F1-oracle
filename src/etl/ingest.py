@@ -2,14 +2,14 @@
 
 import sqlite3
 import logging
+import datetime
 from pathlib import Path
 
 import fastf1
 import pandas as pd
 
+from src.etl.points import race_points
 from src.etl.schema import SCHEMA_SQL
-
-F1_POINTS = {1: 25, 2: 18, 3: 15, 4: 12, 5: 10, 6: 8, 7: 6, 8: 4, 9: 2, 10: 1}
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger(__name__)
@@ -20,7 +20,11 @@ CACHE_DIR = ROOT / "data" / "cache"
 
 fastf1.Cache.enable_cache(str(CACHE_DIR))
 
-START_YEAR, END_YEAR = 2018, 2025
+# 起始年固定 2018（数据覆盖起点）；结束年跟着"今年"走 ——
+# 写死 2025 会让 README「快速开始」的第一步建不出第 9 季，而 import_season
+# 又依赖 events 表，空库时会打印"没有可导入的轮次"然后正常退出（退出码 0）。
+START_YEAR = 2018
+END_YEAR = datetime.date.today().year
 
 
 def _connect():
@@ -222,9 +226,7 @@ def ingest_race(db, year, round_number):
         if pos is None or pd.isna(pos):
             pos = positions_from_laps.get(drv)
 
-        pts = F1_POINTS.get(pos, 0) if pos else 0
-        if fastest_lap_driver and drv == fastest_lap_driver and pos and pos <= 10:
-            pts += 1
+        pts = race_points(pos, year=year, is_fastest_lap=(drv == fastest_lap_driver))
 
         result_rows.append((
             year, round_number,
@@ -321,15 +323,21 @@ def run(years=None):
         log.info("Season %d", year)
 
         try:
-            n_events = ingest_events(db, year)
+            ingest_events(db, year)
         except Exception as e:
             log.warning("  Cannot load schedule for %d: %s", year, e)
             continue
 
-        if n_events == 0:
+        # 轮次以 events 里**真实存在的正数轮次**为准，不能拿行数当上限：
+        # ingest_events 会把测试日（round=0）也写进来，行数因此比实际轮次多 1，
+        # 于是每个赛季都会去请求一个不存在的轮次（get_session 直接抛 ValueError）。
+        rounds = [r for (r,) in db.execute(
+            "SELECT round FROM events WHERE year=? AND round > 0 ORDER BY round",
+            (year,))]
+        if not rounds:
             continue
 
-        for rn in range(1, n_events + 1):
+        for rn in rounds:
             try:
                 ingest_race(db, year, rn)
                 for st in ("FP1", "FP2", "FP3"):

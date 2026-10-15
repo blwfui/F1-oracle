@@ -131,8 +131,12 @@ def main():
         rounds = [r for r in rounds if r[0] <= args.upto]
     rounds = [r for r in rounds if r[0] >= args.from_round]
     if not rounds:
-        print("没有可导入的轮次（检查 events 表）", flush=True)
-        return
+        # ⚠️ 这里以前是 return（退出码 0）—— 空库时会打印一句"没有可导入的轮次"
+        # 然后**正常退出**，调用方（脚本/CI/人）无法区分「赛季已跑完」和「events
+        # 表是空的」。空库恰恰是最需要报错的场景，所以改成非零退出。
+        print(f"[{year}] 没有可导入的轮次 —— events 表里没有该赛季的已完赛轮次。"
+              f"空库请先跑 python -m src.etl.ingest", file=sys.stderr, flush=True)
+        sys.exit(1)
 
     print(f"[{year}] 待处理 {len(rounds)} 轮："
           f"R{rounds[0][0]}–R{rounds[-1][0]}", flush=True)
@@ -169,6 +173,9 @@ def main():
         for rn, cov in failed:
             print(f"   R{rn}: {cov}", flush=True)
     db.close()
+    # 有轮次覆盖不足就非零退出 —— 以前一律返回 0，调度方看不出这次导入是残的
+    if failed:
+        sys.exit(1)
 
 
 if __name__ == "__main__":

@@ -19,16 +19,37 @@
 
 ### 核心数字
 
+数字为 **2018–2025 的 173 场**（不是 190 —— 190 是再加上 2026 那 17 场；两者混用会差约 0.003）
+的 **Spearman ρ** 均值，全部由 `python -m scripts.readme_numbers` 产出。
+
+**"提升"取决于拿什么当分母**，所以两张表都给：
+
 | 预测时点 | 最笨基线 | 本项目 | 提升 |
 |---|---:|---:|---:|
-| 排位赛前（不知发车格） | 0.5501 〔赛前积分榜〕 | **0.6071** | +0.0570 |
+| 排位赛前（不知发车格） | 0.5501 〔赛前积分榜〕 | **0.6082** | +0.0582 |
 | 排位赛后（已知发车格） | 0.6204 〔纯发车格顺序〕 | **0.6543** | +0.0339 |
-| 真实前 10 名口径 | 0.7230 | **0.7680** | +0.0450 |
 
-数字为 2018–2025 全部 190 站的 **Spearman ρ** 均值。配对 t 检验 **t = 4.88**，8 个赛季中 7 个为正 —— 增益不是某一年的运气。
+但这两个都不是现有信号能做出的最强零拟合基线 —— 只拿最笨的当分母，会把提升放大成两倍。
+**对外我主张用同复杂度口径**：
 
-**赛中逐圈预测**：用干净圈节奏外推剩余圈数（gain = 0.25），在比赛 10%–50% 进度区间
-Δρ = **+0.0128**（t = **+7.71**，**8/8 年为正**）。
+| 预测时点 | 同复杂度基线（同样零拟合） | 本项目 | **相对提升** |
+|---|---:|---:|---:|
+| 排位赛前 | 0.5768 〔积分榜 + 练习赛〕 | **0.6082** | **+0.0314**（t = 4.94） |
+| 排位赛后 | 0.6355 〔发车格 + 排位秒差〕 | **0.6543** | **+0.0188**（t = 4.16） |
+| 对照库里最强的零拟合基线（平均完赛名次·仅完赛，0.5849） | | | **+0.0234** |
+
+配对 t 检验（最笨基线口径）：赛前 **t = 5.34**、赛后 **t = 4.93**，**8/8** 个赛季为正 —— 增益不是某一年的运气。
+真实前 10 名口径：**0.7230 → 0.7690**。
+
+**赛中逐圈预测**：用干净圈节奏外推剩余圈数（gain = 0.25）。两个进度窗口方向一致都为正 ——
+10%–50% 区间 Δρ = **+0.0179**（t = **+6.45**）；25%–75% 区间 Δρ = **+0.0125**（t = **+7.57**），均 8/8 年为正。
+⚠️ 检验单位是 **172 场**，不是 6 万个圈：每场的逐圈 Δ 先平均成一个点，且相邻圈的窗口重叠 4/5，
+有效样本量是**场**。
+
+> ⚠️ **所有超参都是在同一批 173 场上选出来的，没有留出集**（`k`、融合权重、罚退收缩 `α`、逐圈 `gain`）。
+> 粗切分复核（2018–2021 / 2022–2025 分半）显示 `k` 与权重的选点在两半一致、不是灾难性过拟合，
+> 但上面的名义 p 值**没有扣除"从十几组里挑最好"这件事**，应当读作偏乐观。
+> 这一条尚未修（见 `docs/` 审查报告 H4）。
 
 ### ρ 是什么，为什么不用「准确率」
 
@@ -36,8 +57,8 @@
 
 不用"准确率"，因为它必须先定一个阈值（猜中冠军算对？±2 位算对？），换个阈值数字就换一副面孔；而 ρ 用满全部名次，且只看顺序、不看差值幅度。
 
-诚实边界也在这里：ρ 从 0.6204 提到 0.6543 在统计上显著（t = 4.88），
-但**平均名次误差只从 3.51 位降到 3.40 位**。所以对外只能说"大致顺序更准了"，不能说"排得准了"。
+诚实边界也在这里：ρ 从 0.6204 提到 0.6543 在统计上显著（t = 4.93），
+但**平均名次误差只从 3.51 位降到 3.36 位**。所以对外只能说"大致顺序更准了"，不能说"排得准了"。
 
 ### 同样重要的是：被证伪的东西
 
@@ -59,12 +80,22 @@
 
 | 排位赛前 ρ | 2018–2025 | 2026 |
 |---|---:|---:|
-| 含 Elo | **0.6071** ✅ | 0.6372 |
-| 去 Elo（仅积分榜 + 练习赛） | 0.5768 | **0.6491** ✅ |
+| 含 Elo | **0.6082** ✅ | 0.6318 |
+| 去 Elo（仅积分榜 + 练习赛） | 0.5768 | **0.6495** ✅ |
 
-Elo 单独在 2026 猜中冠军只有 **11.8%**（历史 54.3%），冠军平均被排到 **4.47 位**（历史 2.37 位）。
+Elo 单独在 2026 猜中冠军只有 **11.8%**（历史 54.3%），冠军平均被排到 **4.53 位**（历史 2.37 位）。
+口径是"**全历史累积后切 2026**"；只喂 2026 那 17 场则是 35.3% / 3.59 —— 两个口径差很远，引用时必须说明。
+
+⚠️ **这一条是探索性发现，不是结论**：Δρ = +0.0177 的配对检验 **t = +1.10（n = 17）**，
+按本项目自己对内使用的 |t| > 2 门槛**不成立**。要等 2027 赛季才能验证。
+
 原因：Elo 天然携带 2025 及以前的赛车能力，而 2026 换了动力单元与主动空力、车队顺序被打乱，
 k = 192 的衰减速度需要好几站才能把旧信息冲掉 —— 17 站显然不够。
+
+**另外，"2026 的 ρ 更高"也不是混杂造成的。** 2026 退赛率 20.9%，落在历史最差那一档，
+而主指标 `rho_all` 与退赛率**负相关**（−0.565，退赛越多 ρ 越低）。按退赛率匹配后 2026 仍更高：
+同档历史场次（n=59）rho_all 0.4929 / rho_fin 0.6996；2026 则是 0.6468 / 0.8146。
+所以数字站得住 —— 但也**不能**由此推出"2026 超车更难、比赛更巡航化"，那仍然只是一个未证实的假说。
 
 这不是坏消息。它把一个模糊的直觉（"新规让格局变了"）变成了一个**可测的数字**。
 
@@ -73,8 +104,8 @@ k = 192 的衰减速度需要好几站才能把旧信息冲掉 —— 17 站显�
 | | |
 |---|---|
 | 赛季 | 2018–2026（9 季） |
-| 分站 | 190 |
-| 圈速记录 | 208,108 |
+| 分站 | 190 = **173**（2018–2025）+ **17**（2026） |
+| 圈速记录 | 208,108 = 188,487 + 19,621 |
 | 赛道（含几何与进站损失） | 31 |
 | 车手 / 车队 | 44 / 19 个队名（= **11 支物理车队**，改名已归并） |
 | 存储 | 单个 SQLite 文件，28 MB |
@@ -162,7 +193,8 @@ docs/               评估报告、对标分析与回放动画指南
 ### 已知局限
 
 - **冠军几乎猜不准** —— 上限约 49–55%，被比赛内的随机事件封死。价值在排序，不在猜冠军
-- **2026 新规年的结论还不够硬** —— 去 Elo 更好只领先 0.0119，17 场不足以定论
+- **2026 新规年的结论还不够硬** —— 去 Elo 更好只领先 0.0177，配对检验 t = 1.10（17 场），
+  按本项目自己的 |t|>2 门槛不成立；要等 2027 赛季验证
 - **后段（真实第 16–20 名）误差约为前段的 3 倍** —— 这正是对外应看前 10 口径的原因
 - **「车手分 + 车队分」不能当解释用** —— 一队两台车，车手与赛车的贡献**无法分离**。
   分成比例 `driver_share` 对预测几乎无影响（实测 0.5→0.9，ρ 跨度仅 0.0035），
@@ -203,18 +235,42 @@ significance test — and **the approaches that were falsified are documented to
 
 ### Headline numbers
 
+Mean **Spearman ρ** over the **173 races of 2018–2025** (not 190 — 190 is those plus the 17 of
+2026; mixing the two shifts ρ by ~0.003). Every number below is produced by
+`python -m scripts.readme_numbers`.
+
+**The gain depends on the denominator**, so here are both tables:
+
 | Prediction point | Naive baseline | This project | Gain |
 |---|---:|---:|---:|
-| Pre-qualifying (grid unknown) | 0.5501 〔championship standings〕 | **0.6071** | +0.0570 |
+| Pre-qualifying (grid unknown) | 0.5501 〔championship standings〕 | **0.6082** | +0.0582 |
 | Post-qualifying (grid known) | 0.6204 〔grid order〕 | **0.6543** | +0.0339 |
-| Actual top-10 only | 0.7230 | **0.7680** | +0.0450 |
 
-Mean **Spearman ρ** over all 190 races of 2018–2025. Paired t-test **t = 4.88**,
-positive in 7 of 8 seasons — not a one-year fluke.
+But neither of those is the strongest zero-fit baseline available from the same signals —
+using only the dumbest one roughly doubles the apparent gain. **The comparison I stand
+behind is against same-complexity baselines:**
 
-**In-race lap-by-lap prediction**: projecting remaining laps from clean-pace
-(gain = 0.25) yields Δρ = **+0.0128** in the 10%–50% race-progress band
-(t = **+7.71**, **positive in 8/8 seasons**).
+| Prediction point | Same-complexity baseline (zero-fit) | This project | **Gain** |
+|---|---:|---:|---:|
+| Pre-qualifying | 0.5768 〔standings + practice〕 | **0.6082** | **+0.0314** (t = 4.94) |
+| Post-qualifying | 0.6355 〔grid + quali gap〕 | **0.6543** | **+0.0188** (t = 4.16) |
+| Against the strongest zero-fit baseline in the repo (avg finish, finishers only, 0.5849) | | | **+0.0234** |
+
+Paired t-test (naive-baseline framing): **t = 5.34** pre-qualifying, **t = 4.93** post-qualifying,
+positive in **8/8** seasons — not a one-year fluke. Actual top-10 subset: **0.7230 → 0.7690**.
+
+**In-race lap-by-lap prediction**: projecting remaining laps from clean pace (gain = 0.25).
+Both progress windows agree and are positive — Δρ = **+0.0179** over 10%–50%
+(t = **+6.45**), and **+0.0125** over 25%–75% (t = **+7.57**), both 8/8 seasons.
+⚠️ The unit of the test is **172 races**, not 60,000 laps: each race's lap deltas are averaged
+into a single point, and adjacent windows overlap 4/5 — the effective sample size is races.
+
+> ⚠️ **Every hyperparameter was selected on this same set of 173 races, with no holdout**
+> (`k`, blend weights, the grid-penalty shrink `α`, the lap-by-lap `gain`). A coarse split
+> check (2018–2021 vs 2022–2025) shows the chosen `k` and weights are stable across halves —
+> not catastrophic overfitting — but the nominal p-values above **do not account for picking the
+> best of a dozen configurations**, so read them as somewhat optimistic. Not yet fixed (H4 in
+> the `docs/` audit report).
 
 ### Why ρ, not "accuracy"
 
@@ -226,7 +282,7 @@ winner enough? within ±2 places?), and the number changes with the threshold. �
 every position, and cares only about ordering, not magnitude.
 
 The honest boundary sits here too: raising ρ from 0.6204 to 0.6543 is statistically
-significant (t = 4.88), but it moves the **mean position error only from 3.51 to 3.40**.
+significant (t = 4.93), but it moves the **mean position error only from 3.51 to 3.36**.
 So the correct claim is "the rough order is better" — not "the ordering is accurate".
 
 ### Equally important: what was falsified
@@ -251,14 +307,27 @@ Same weights, opposite conclusions in two eras:
 
 | Pre-qualifying ρ | 2018–2025 | 2026 |
 |---|---:|---:|
-| With Elo | **0.6071** ✅ | 0.6372 |
-| Without Elo (standings + practice only) | 0.5768 | **0.6491** ✅ |
+| With Elo | **0.6082** ✅ | 0.6318 |
+| Without Elo (standings + practice only) | 0.5768 | **0.6495** ✅ |
 
 Elo alone picks the winner in only **11.8%** of 2026 races (54.3% historically), and places
-the eventual winner at an average of **4.47** (2.37 historically). The reason: Elo carries
-car performance from 2025 and earlier, while 2026 brought new power units and active
-aerodynamics that reshuffled the running order — and at k = 192, Elo needs several races to
+the eventual winner at an average of **4.53** (2.37 historically). That figure uses the
+"accumulate all history, then slice 2026" convention; feeding it only the 17 races of 2026
+gives 35.3% / 3.59 — the two conventions differ a lot and must be labelled.
+
+⚠️ **This is an exploratory finding, not a conclusion**: the paired test on Δρ = +0.0177 gives
+**t = +1.10 (n = 17)**, which fails the project's own |t| > 2 bar. It needs the 2027 season.
+
+Reason: Elo carries car performance from 2025 and earlier, while 2026 brought new power units and
+active aerodynamics that reshuffled the running order — and at k = 192, Elo needs several races to
 flush out stale information. Seventeen is not enough.
+
+**Nor is "2026 has a higher ρ" an artefact of its DNF rate.** 2026 retired 20.9% of entries — the
+worst historical band — and the headline metric `rho_all` is *negatively* correlated with the
+retirement rate (−0.565: more retirements, lower ρ). Matched on that rate, 2026 is still higher:
+historical races in the same band (n=59) average rho_all 0.4929 / rho_fin 0.6996, versus
+2026's 0.6468 / 0.8146. The number holds up — but that still does **not** license the claim that
+"overtaking got harder"; that remains an untested hypothesis.
 
 This is good news, not bad. It turns a vague intuition ("the new rules changed the order")
 into a **measurable number**.
@@ -268,8 +337,8 @@ into a **measurable number**.
 | | |
 |---|---|
 | Seasons | 2018–2026 (9) |
-| Grands Prix | 190 |
-| Lap records | 208,108 |
+| Grands Prix | 190 = **173** (2018–2025) + **17** (2026) |
+| Lap records | 208,108 = 188,487 + 19,621 |
 | Circuits (with geometry + pit loss) | 31 |
 | Drivers / Teams | 44 / 19 team names (= **11 physical teams**; renames merged) |
 | Storage | single SQLite file, 28 MB |
@@ -365,7 +434,8 @@ For a real language **toggle** rather than a straight replacement, add a locale-
 
 - **Winners are essentially unpredictable** — capped around 49–55% by in-race randomness.
   The value is in ordering, not in calling the winner
-- **The 2026 finding is not yet conclusive** — dropping Elo wins by only 0.0119 over 17 races
+- **The 2026 finding is not yet conclusive** — dropping Elo wins by only 0.0177, paired test
+  t = 1.10 over 17 races, which fails the project's own |t| > 2 bar; it needs the 2027 season
 - **The back of the field (actual P16–P20) has ~3× the error of the front** — the reason the
   top-10 view is the one worth quoting
 - **"Driver rating + team rating" is not an explanation** — with two cars per team, driver and

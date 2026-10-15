@@ -3,6 +3,7 @@
 import sys
 import sqlite3
 import time
+from datetime import date
 from pathlib import Path
 
 import requests
@@ -17,7 +18,25 @@ TEAM_MAP = {
     "Sauber": "Kick Sauber",
 }
 
-YEAR = int(sys.argv[1]) if len(sys.argv) > 1 else 2025
+def _latest_season() -> int:
+    """库里已有的最新赛季 —— 官方对账的默认目标。
+
+    ⚠️ 以前写死 2025：于是 2025 及以前的 years 都被对账过、错误被覆盖掩盖，
+    而当时最新的 2026 从未对账 —— 最快圈多发 1 分与两列 NULL 都是这么攒出来的。
+    默认值跟着**数据**走，别再跟年份走。
+    """
+    try:
+        db = sqlite3.connect(str(DB_PATH))
+        row = db.execute("SELECT MAX(year) FROM results").fetchone()
+        db.close()
+        if row and row[0]:
+            return int(row[0])
+    except sqlite3.Error:
+        pass
+    return date.today().year
+
+
+YEAR = int(sys.argv[1]) if len(sys.argv) > 1 else _latest_season()
 
 
 def fetch_race_results(round_num):
