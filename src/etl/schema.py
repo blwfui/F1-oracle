@@ -143,6 +143,11 @@ CREATE TABLE IF NOT EXISTS circuits (
     pit_loss_sc_s     REAL,
     pit_loss_vsc_s    REAL,
     outline_json   TEXT,
+    -- 真实维修区几何，来自实跑遥测（scripts/fetch_pit_lane.py）。
+    -- JSON: {"path":[[x,y],...], "entry":frac, "exit":frac,
+    --        "boxes":{driver:frac}, "meta":{...}}
+    -- 坐标同为米、与 outline_json 同一坐标系；entry/exit/boxes 为弧长比例。
+    pit_lane_json  TEXT,
     -- 全历史经验统计（⚠️ 仅供展示，勿作特征）
     races          INTEGER,
     pole_win_n     INTEGER,

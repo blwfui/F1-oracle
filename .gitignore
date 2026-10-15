@@ -17,6 +17,10 @@ data/*.db-shm
 data/*.db-wal
 data/*.log
 
+# Generated replay animations (self-contained HTML, ~200 KB each).
+# Regenerate with:  python -m scripts.export_replay <year> <round>
+outputs/
+
 # Temp files
 *.txt
 !docs/*.txt
