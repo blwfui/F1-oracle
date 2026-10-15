@@ -63,9 +63,13 @@
 > 所以 `α = 0.75` 只能说"一组效果相近的取值之一"，不是"调出来的最优值"。
 > 唯一被 8/8 折一致选中的是 `dnf_policy = finishers_only`。
 >
-> ⚠️ **本次留出验证没有覆盖逐圈预测那组数字**：`gain`（0.25）与窗口宽度仍是样本内选的，
-> 因为算出那组口径的脚本本身还没入库（审查报告 M4）。上面「赛中逐圈预测」的 Δρ 与 t
-> **不享受这次留出验证**，仍应读作样本内。
+> ⚠️ **逐圈那组也已单独做过同样的留出验证**（`scripts/holdout_eval.py` 的思路套到
+> `gain` 上，两个进度窗口 × 主切分 + 前向滚动，四个口径全过门槛）：
+> 10–50% 窗口 主切分 **+0.0152**（t=3.03）/ 前向滚动 **+0.0168**（t=4.05）；
+> 25–75% 窗口 主切分 **+0.0112**（t=3.85）/ 前向滚动 **+0.0114**（t=4.64）。
+> 乐观量比横截面更小（15% / 10%），`gain=0.25` 也确认是**内点解**而非网格边界。
+> **仍未覆盖的是 `window`（固定为 5，没扫过）** —— 那一维没有留出证据。
+> 产出这组数字的脚本现在是 `python -m scripts.verify_claims --lap`。
 
 ### ρ 是什么，为什么不用「准确率」
 
@@ -76,6 +80,20 @@
 诚实边界也在这里：ρ 从 0.6204 提到 0.6543 在统计上显著（t = 4.93），
 但**平均名次误差只从 3.51 位降到 3.36 位**。所以对外只能说"大致顺序更准了"，不能说"排得准了"。
 
+**两个 ρ 口径，以及为什么主指标选的是更严的那个。** 模型层有一条明确主张：
+退赛者的 `position` 是按行驶距离分配的**分类名次**，把它算进相关性里等于"把运气差当速度慢"。
+如果照这条主张走，主指标该用 `rho_fin`（只比完赛者）。我们却用 `rho_all`（全部人）。
+这不是在挑好看的指标 —— **恰恰相反，`rho_all` 是更严的那个**：
+
+| 对照 | Δρ_all（t） | Δρ_fin（t） |
+|---|---:|---:|
+| 赛前 best_pre vs 同复杂度 | +0.0314（4.94） | **+0.0372**（6.11） |
+| 赛后 best_post vs 同复杂度 | +0.0188（4.16） | **+0.0307**（5.20） |
+| 赛后 best_post vs 纯发车格 | +0.0339（4.93） | **+0.0512**（7.32） |
+
+原因是退赛会让**基线**掉得比模型更多。所以用 `rho_all` 报出来的增益是**悲观**的那一版；
+两个口径都列在 `scripts/verify_claims.py` 里，谁都能自己验。（审查报告 L3。）
+
 ### 同样重要的是：被证伪的东西
 
 | 尝试 | 结果 |
@@ -84,10 +102,19 @@
 | 「风险最高 3 人」命中率 | 15.8% vs 基准 14.9% |
 | 圈速中位数作为特征 | 无增量（t = 0.38） |
 | 进站补偿修正 | 概念错误：「已付过的成本」不等于「优势」 |
-| 权重微调（Elo 0.3 → 0.4） | 无显著增益（t = 1.44） |
+
+**⚠️ 这条不在上表里，因为它不是「被证伪」，是「测不出来」：**
+
+| 尝试 | 结果 | 为什么不算证伪 |
+|---|---|---|
+| 融合权重微调（Elo 0.3 → 0.4） | t = 1.44 | 方向**是正的**（+0.0034），而 n=173 下这个检验的最小可检测效应约 **0.008** —— **大于它想检测的效应**。功效不足的检验什么都没证明，不该进上面那张表 |
+
+（审查报告 L1。原表把这行列进"被证伪清单"，是把"证据不足"当成了"被证伪"。
+顺带记录另一处内部不一致：`best_post` 用的是 Elo 权重 0.3，而权重扫描显示 0.4 更好 ——
+但 +0.0028 的差距配上 t=1.30，同样够不着门槛，所以**没有**改生产权重。）
 
 最有说服力的是一个反例：把退赛者排除出评分更新（`finishers_only`）**这一个开关**，
-收益 **+0.0238（t = 4.05）**，大于整个 DNF 模型的全部努力。原因不难理解 ——
+收益 **+0.0245（t = 3.99）**，大于整个 DNF 模型的全部努力。原因不难理解 ——
 退赛多由爆胎、被撞、机械故障造成，把这种随机性灌进本该衡量速度的评分里只会让它变差。
 
 ### 2026 新规年：一个真实发现
@@ -175,15 +202,25 @@ python -m scripts.export_replay 2023 3     # 2023 年第 3 站（轮次，不是
 
 ```bash
 pip install -r requirements-dev.txt
-pytest                     # 107 项，约 5 秒
+pytest                     # 119 项，约 15 秒
 ```
 
 测试**不需要数据库、也不联网**（内存 SQLite 夹具），跑的全是已经踩过的坑：
 完赛/退赛语义的两套实现必须逐字一致、最快圈积分规则按年份、车队血缘分并、
 回测框架的防泄漏结构、AI 查询守卫的真值表（含 CTE 与 `load_extension`）、
-入库完整性判据，以及**留出验证的预注册判据本身**（`tests/test_holdout.py`
-把 `Δρ>0 / t>2 / 正向年份≥半数` 钉死 —— 事后放松判据会直接测试失败）。
+入库完整性判据、**留出验证的预注册判据本身**（`tests/test_holdout.py`
+把 `Δρ>0 / t>2 / 正向年份≥半数` 钉死 —— 事后放松判据会直接测试失败）、
+**仪表板的 SQL 卫生**（`tests/test_dashboard_sql.py` 静态扫描：任何把变量拼进
+SQL 值的写法都会红，除非显式加进白名单并写明理由）、以及导出层的
+`<script>` 转义与 `times()` 缓存语义。
 CI 在 `.github/workflows/ci.yml`。
+
+**另有一条"自己验"的入口**，与测试互补 —— 测试管"别退回去"，这条管"数字是真的"：
+
+```bash
+python -m scripts.verify_claims          # 与 README 里的字符串逐条比对，判 ✅/❌，约 4 秒
+python -m scripts.verify_claims --lap    # 含逐圈 Δρ（多约 80 秒）
+```
 
 ### 项目结构
 
@@ -194,7 +231,8 @@ src/
   model/            预测层：回测框架 / 预测器库 / 逐圈分析 / 脏圈识别 / 车队身份
   dashboard/        Streamlit 界面，六个页面
 scripts/            回测、导入、评估、演示等命令行工具
-                    （含 holdout_eval.py —— 留出验证：选参与评估分离）
+                    verify_claims.py  —— 与 README 数字逐条比对的核验入口（自己验）
+                    holdout_eval.py   —— 留出验证：选参与评估分离
 tests/              回归测试（不需要数据库）
 docs/               评估报告、对标分析、审查报告、留出验证记录与回放动画指南
 ```
@@ -318,10 +356,14 @@ into a single point, and adjacent windows overlap 4/5 — the effective sample s
 > near-equivalent choices", not "the tuned optimum". The only knob picked unanimously by
 > 8/8 folds is `dnf_policy = finishers_only`.
 >
-> ⚠️ **The lap-by-lap numbers are NOT covered by this holdout validation**: `gain` (0.25) and the
-> window width are still tuned in-sample, because the script that produces that metric is not in
-> the repo yet (audit item M4). The in-race lap-by-lap Δρ and t above therefore still count as
-> in-sample.
+> ⚠️ **The lap-by-lap numbers got the same holdout treatment separately** (the
+> `scripts/holdout_eval.py` approach applied to `gain`: two progress windows × main split +
+> walk-forward — all four pass the bar): 10–50% main split **+0.0152** (t=3.03) /
+> walk-forward **+0.0168** (t=4.05); 25–75% main split **+0.0112** (t=3.85) /
+> walk-forward **+0.0114** (t=4.64). The optimism is smaller than the cross-sectional
+> case (15% / 10%), and `gain=0.25` is confirmed to be an **interior** optimum, not a grid
+> boundary. **`window` (fixed at 5) is still unvalidated** — that dimension has no holdout
+> evidence. The script producing these numbers is now `python -m scripts.verify_claims --lap`.
 
 ### Why ρ, not "accuracy"
 
@@ -336,6 +378,22 @@ The honest boundary sits here too: raising ρ from 0.6204 to 0.6543 is statistic
 significant (t = 4.93), but it moves the **mean position error only from 3.51 to 3.36**.
 So the correct claim is "the rough order is better" — not "the ordering is accurate".
 
+**Two ρ variants, and why the headline one is the stricter of the two.** The model layer
+argues explicitly that a retired driver's `position` is a *classification* placing, and
+counting it = "treating bad luck as slow pace". Following that argument literally would mean
+using `rho_fin` (finishers only) as the primary metric. We use `rho_all` (everyone) instead.
+That is not metric-shopping — **`rho_all` is the stricter one**:
+
+| Comparison | Δρ_all (t) | Δρ_fin (t) |
+|---|---:|---:|
+| Pre-quali best_pre vs same-complexity | +0.0314 (4.94) | **+0.0372** (6.11) |
+| Post-quali best_post vs same-complexity | +0.0188 (4.16) | **+0.0307** (5.20) |
+| Post-quali best_post vs plain grid | +0.0339 (4.93) | **+0.0512** (7.32) |
+
+Retirements cost the **baseline** more than the model, so the `rho_all` figure is the
+pessimistic version. Both are printed by `scripts/verify_claims.py` — check it yourself.
+(Audit item L3.)
+
 ### Equally important: what was falsified
 
 | Attempt | Result |
@@ -344,10 +402,20 @@ So the correct claim is "the rough order is better" — not "the ordering is acc
 | "Top-3 highest risk" hit rate | 15.8% vs 14.9% baseline |
 | Median lap time as a feature | No gain (t = 0.38) |
 | Pit-stop compensation | Conceptually wrong: a cost already paid is not an advantage |
-| Weight tuning (Elo 0.3 → 0.4) | No significant gain (t = 1.44) |
+
+**⚠️ The next one is deliberately NOT in that table — it was not falsified, it was unmeasurable:**
+
+| Attempt | Result | Why it does not count as falsification |
+|---|---|---|
+| Blend-weight tuning (Elo 0.3 → 0.4) | t = 1.44 | The direction was **positive** (+0.0034), while at n=173 this test's minimum detectable effect is about **0.008** — **larger than the effect it was trying to detect**. An underpowered test proves nothing and does not belong in the table above |
+
+(Audit item L1. The original table called this "falsified"; that conflates "insufficient
+evidence" with "disproved". Related inconsistency, recorded for the record: `best_post`
+uses an Elo weight of 0.3 while the weight sweep prefers 0.4 — but that +0.0028 gap comes
+with t=1.30, equally below the bar, so the production weight was **not** changed.)
 
 The most instructive result is a counter-example: simply excluding retired drivers from
-rating updates (`finishers_only`) — **one switch** — gains **+0.0238 (t = 4.05)**,
+rating updates (`finishers_only`) — **one switch** — gains **+0.0245 (t = 3.99)**,
 more than the entire DNF model effort. Retirements are mostly punctures, collisions and
 mechanical failures; feeding that randomness into a rating meant to measure pace only
 makes it worse.
@@ -448,15 +516,28 @@ language, see the [replay guide](docs/replay-guide.md).**
 
 ```bash
 pip install -r requirements-dev.txt
-pytest                     # 107 tests, ~5 seconds
+pytest                     # 119 tests, ~15 seconds
 ```
 
 The tests need **no database and no network** (in-memory SQLite fixtures). They cover the
 mistakes that have already bitten this project: the two implementations of finish/DNF semantics
 must agree exactly, the fastest-lap points rule by season, team-lineage collapsing, the
 backtest framework's structural leakage guards, the AI SQL guard's truth table (including CTEs
-and `load_extension`), and the ingestion completeness criteria.
+and `load_extension`), the ingestion completeness criteria, **the holdout validation's
+pre-registered criteria themselves** (`tests/test_holdout.py` pins `Δρ>0 / t>2 / majority of
+positive years` — loosening them after the fact fails the build), **dashboard SQL hygiene**
+(`tests/test_dashboard_sql.py` statically scans for any variable interpolated into SQL; it fails
+unless the name is explicitly whitelisted with a reason), and the export layer's `<script>`
+escaping and `times()` cache semantics.
 CI lives in `.github/workflows/ci.yml`.
+
+**There is also a "verify it yourself" entry point**, complementary to the tests — the tests
+guard against regressions, this one checks that the numbers are real:
+
+```bash
+python -m scripts.verify_claims          # compares against the README strings, ✅/❌, ~4s
+python -m scripts.verify_claims --lap    # includes lap-by-lap Δρ (+80s)
+```
 
 ### Layout
 
@@ -467,7 +548,8 @@ src/
   model/            prediction layer: backtest framework / predictors / lap analysis / dirty-lap detection / team identity
   dashboard/        Streamlit UI, six pages
 scripts/            backtest, ingest, evaluation and demo CLIs
-                    (incl. holdout_eval.py — holdout validation: tuning split from evaluation)
+                    verify_claims.py  — verifies the README numbers, row by row
+                    holdout_eval.py   — holdout validation: tuning split from evaluation
 tests/              regression tests (no database needed)
 docs/               evaluation reports, benchmarks, audit report, holdout record and replay guide
 ```

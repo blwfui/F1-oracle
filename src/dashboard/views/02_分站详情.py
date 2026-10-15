@@ -24,7 +24,7 @@ def render(year):
 
     # ── AI 分析 ──────────────────────────────────────────────
     st.subheader("📝 AI 赛事战报")
-    if st.button("🤖 生成 AI 战报", key=f"report_{selected_round}", use_container_width=True):
+    if st.button("🤖 生成 AI 战报", key=f"report_{selected_round}", width="stretch"):
         from ai_chat import generate_race_report
 
         with st.spinner("AI 正在分析比赛数据…"):
@@ -57,7 +57,7 @@ def render(year):
         st.markdown(report)
 
     st.subheader("🔧 AI 策略分析")
-    if st.button("🤖 生成策略分析", key=f"strategy_{selected_round}", use_container_width=True):
+    if st.button("🤖 生成策略分析", key=f"strategy_{selected_round}", width="stretch"):
         from ai_chat import generate_strategy_analysis
 
         with st.spinner("AI 正在分析进站策略…"):
@@ -354,7 +354,7 @@ def render(year):
                 fig.update_xaxes(showspikes=True, spikemode="across",
                                  spikesnap="cursor", spikethickness=1,
                                  spikecolor="rgba(128,128,128,0.4)")
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width="stretch")
 
         _lap_chart_fragment()
 
@@ -374,4 +374,4 @@ def render(year):
         fig = _chart_style(fig, height=350)
         fig.update_layout(xaxis_title="", yaxis_title="圈数")
         fig.update_traces(marker_line_color="rgba(0,0,0,0.25)", marker_line_width=1)
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")

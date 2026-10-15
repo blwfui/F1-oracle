@@ -66,9 +66,16 @@ from src.model.backtest import load_races, run_backtest  # noqa: E402
 from src.model.predictors import (  # noqa: E402
     AdjustedGridBaseline, EloPredictor, GridBaseline, PointsBaseline,
     PracticePaceBaseline, QualiGapBaseline, RankBlend, best_post, best_pre,
+    same_complexity_post, same_complexity_pre,
 )
 
 RULE = "─" * 78
+
+# ── 对照：与 README「同复杂度」口径**逐字一致** ──────────────
+# 定义已归一到 `src/model/predictors.py`，这里直接引用 ——
+# 以前两处各复刻一份，权重一漂开两份结果就不可比（审查报告 M3 那类病）。
+cmp_pre = same_complexity_pre
+cmp_post = same_complexity_post
 
 # ── 调参面 ──────────────────────────────────────────────────
 K_GRID = (8, 16, 24, 40, 64, 96, 128, 192, 256)
@@ -133,15 +140,7 @@ def post_factory(k: float, policy: str, alpha: float, min_pen: int,
     return build
 
 
-# ── 对照组：与 README「同复杂度」口径逐字一致 ────────────────
-def cmp_pre():
-    return RankBlend([(PointsBaseline(), 0.5), (PracticePaceBaseline(), 0.5)],
-                     "积分榜+练习赛")
-
-
-def cmp_post():
-    return RankBlend([(GridBaseline(), 0.3), (QualiGapBaseline(), 0.7)],
-                     "发车格+秒差")
+# ── 对照组已在 import 段从 predictors 归一，见 cmp_pre / cmp_post ──
 
 
 def simplex(step: float = W_STEP):

@@ -35,26 +35,18 @@ from src.model.backtest import (  # noqa: E402
 from src.model.predictors import (  # noqa: E402
     AvgFinishBaseline, EloPredictor, GridBaseline, PointsBaseline,
     PracticePaceBaseline, QualiGapBaseline, RankBlend, best_post, best_pre,
+    same_complexity_post, same_complexity_pre,
 )
 
 RULE = "─" * 78
 
-
-def same_complexity_pre():
-    """同复杂度（零拟合）的赛前对照：积分榜 + 练习赛，不含 Elo。"""
-    return RankBlend([(PointsBaseline(), 0.5), (PracticePaceBaseline(), 0.5)],
-                     "积分榜+练习赛")
-
-
-def same_complexity_post():
-    """同复杂度（零拟合）的赛后对照：发车格 + 排位秒差，不含 Elo。"""
-    return RankBlend([(GridBaseline(), 0.3), (QualiGapBaseline(), 0.7)],
-                     "发车格+秒差")
+# 「同复杂度」对照的定义已归一到 `src/model/predictors.py`（唯一定义）——
+# 以前这里、`holdout_eval.py` 各复刻一份，权重一漂开就不可比了（审查报告 M3 那类病）。
 
 
 def no_elo_pre():
-    """2026「去 Elo」用的组合。"""
-    return RankBlend([(PointsBaseline(), 0.5), (PracticePaceBaseline(), 0.5)], "去Elo")
+    """2026「去 Elo」用的组合。与 same_complexity_pre 同式，只是语义不同（对照 vs 替代品）。"""
+    return same_complexity_pre()
 
 
 def paired(a_df, b_df, col: str = "rho_all") -> dict:

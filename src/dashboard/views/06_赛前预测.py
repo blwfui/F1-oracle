@@ -157,7 +157,7 @@ def _tab_pre(year, rnd, teams):
         fig.update_layout(xaxis_title="赛前积分", yaxis_title="", showlegend=False,
                           title="赛前车手积分榜（本场之前的累计）")
         fig.update_yaxes(categoryarray=order)
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
 
     order = _predict(year, rnd, "pre_quali")
     if not order:
@@ -197,7 +197,7 @@ def _tab_quali(year, rnd, teams):
                          "最快圈": _fmt_lap_time(r["time"]) or "—",  # noqa: F405
                          "差距": gap,
                          "发车": f"P{int(r['grid'])}" if r["grid"] else "维修区"})
-        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)  # noqa: F405
+        st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)  # noqa: F405
         st.caption("注意：**排位名次 ≠ 发车位置**。排位成绩取自 `results` 表"
                    "（`quali_pos` + q1/q2/q3），覆盖率 100%；`sessions` 表只存练习赛。")
 
@@ -221,7 +221,7 @@ def _tab_quali(year, rnd, teams):
         fig.update_yaxes(autorange="reversed", title="位次")
         fig = _chart_style(fig, height=max(260, len(moved) * 26 + 120))  # noqa: F405
         fig.update_layout(title="排位成绩 → 实际发车格（红=被罚退 绿=因他人受罚受益）")
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
 
     pen = q[(q["grid"] > 0) & (q["grid"] - q["quali_pos"] >= 3)]
     if not pen.empty:
@@ -229,7 +229,7 @@ def _tab_quali(year, rnd, teams):
         rows = [{"车手": _dname(r["driver"]), "排位": f"Q{int(r['quali_pos'])}",  # noqa: F405
                  "发车": f"P{int(r['grid'])}", "退后": f"{int(r['grid'] - r['quali_pos'])} 位"}
                 for _, r in pen.sort_values("quali_pos").iterrows()]
-        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)  # noqa: F405
+        st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)  # noqa: F405
         st.caption("模型不会按发车格估值这些车手 —— 实测被罚退 ≥10 位者，"
                    "完赛名次与**排位**的差仅 2.16 位，与**发车格**的差达 10.42 位。")
 
@@ -251,7 +251,7 @@ def _tab_quali(year, rnd, teams):
                               "现在": f"P{order.index(d) + 1}",
                               "调整": f"{'↑' if s > 0 else '↓' if s < 0 else '—'}"
                                       f"{abs(s) if s else ''}"})
-        st.dataframe(pd.DataFrame(shift), use_container_width=True, hide_index=True)  # noqa: F405
+        st.dataframe(pd.DataFrame(shift), width="stretch", hide_index=True)  # noqa: F405
 
 
 # ── ③ 逐圈复盘 ───────────────────────────────────────────────
@@ -295,7 +295,7 @@ def _tab_laps(year, rnd, teams):
                           yaxis_range=[0, 1.02],
                           title="逐圈收敛曲线 · 比赛跑到第几圈基本定型")
         fig = _chart_style(fig, height=400)  # noqa: F405
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
 
         mid_b = b[(b["pct"] >= 25) & (b["pct"] < 75)]["rho_all"].mean()
         c1, c2, c3, c4 = st.columns(4)
@@ -321,7 +321,7 @@ def _tab_laps(year, rnd, teams):
                  "从": _dname(x["prev"]), "到": _dname(x["leader"]),  # noqa: F405
                  "状态": "安全车/VSC" if x["neutralized"] else "绿旗"}
                 for x in lc]
-        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)  # noqa: F405
+        st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)  # noqa: F405
 
     # 最混乱的圈
     sw = tl.swing_laps(5)
@@ -332,7 +332,7 @@ def _tab_laps(year, rnd, teams):
                  "涉及": "、".join(_dname(d) for d in x["drivers"][:6])  # noqa: F405
                         + ("…" if len(x["drivers"]) > 6 else "")}
                 for x in sw]
-        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)  # noqa: F405
+        st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)  # noqa: F405
 
     # 追赶可行性
     st.subheader("追赶可行性")
@@ -359,7 +359,7 @@ def _tab_laps(year, rnd, teams):
         rows.append({"名次": f"P{pos[d]}", "车手": _dname(d),  # noqa: F405
                      "与前车": f"{ga[d]:.1f}s", "速度差": f"{dp:+.3f}s/圈",
                      "需圈数": need, "判定": verdict})
-    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)  # noqa: F405
+    st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)  # noqa: F405
     st.caption(f"剩余 {remain} 圈。速度差用干净圈速中位数（已排除安全车 / 进站 / 冷胎 / 交通圈）。"
                + ("　⚠️ 本圈处于安全车下，秒差失去可比性。" if tl.is_neutralized(lap) else ""))
 
@@ -371,7 +371,7 @@ def _order_table(order, teams, tag):
              "车队": _tname(teams.get(d, "")),  # noqa: F405
              "": tag if i == 1 else ""}
             for i, d in enumerate(order[:10], 1)]
-    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)  # noqa: F405
+    st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)  # noqa: F405
 
 
 def _tab_result(year, rnd, teams):
@@ -411,7 +411,7 @@ def _tab_result(year, rnd, teams):
     fig.update_xaxes(title="名次", dtick=1)
     fig = _chart_style(fig, height=max(320, len(names) * 26 + 120))  # noqa: F405
     fig.update_layout(title="预测名次 → 实际名次（连线越短越准）")
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
     c1, c2, c3, c4 = st.columns(4)
     winner = actual[0]
@@ -438,6 +438,6 @@ def _tab_result(year, rnd, teams):
             "误差": f"{err:+d}" if err is not None else "—",
             "状态": STATUS_CN.get(t.status, t.status),  # noqa: F405
         })
-    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)  # noqa: F405
+    st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)  # noqa: F405
     st.caption("提示：「误差」为正表示模型高估了（预测名次比实际靠前）；"
                "为负表示低估。系统性偏向某一侧就是可以修的信号。")

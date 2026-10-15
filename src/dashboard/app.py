@@ -152,7 +152,7 @@ for i, (icon, name) in enumerate(nav_pages):
     st.sidebar.button(
         f"{icon}  {name}",
         key=f"nav_{i}",
-        use_container_width=True,
+        width="stretch",
         type="primary" if active else "secondary",
         on_click=_set_page,
         args=(name,),

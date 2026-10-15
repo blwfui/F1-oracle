@@ -544,3 +544,30 @@ def best_post():
                       (QualiGapBaseline(), 0.3),
                       (EloPredictor(k=192, use_team=True,
                                     dnf_policy="finishers_only"), 0.3)], "发车格(罚退收缩)+秒差+Elo")
+
+
+# ═══════════════════════════════════════════════════════════
+# 「同复杂度」对照 —— 唯一定义。**对外报增益只准用这两个分母。**
+# ═══════════════════════════════════════════════════════════
+# 为什么要单列一节：README、`scripts/readme_numbers.py`、`scripts/holdout_eval.py`
+# 都各自复刻过一份，三份的权重一旦漂开，"相对同复杂度提升"就不可比了 ——
+# 审查报告 M3 抓到的"README 抄了 25–75% 的数却标成 10–50%"就是这一类病。
+# 归到一处以后，改权重只改这里，三处自动同步。
+#
+# 语义：**与 best_pre / best_post 同等复杂度**（同样零拟合），但不含 Elo。
+# 这样差值读作"Elo 这一层带来了多少"，而不是"我们比一个故意做弱的基线强多少"。
+#
+# ⚠️ 它们仍**不是**库里最强的零拟合基线。最强的是 `AvgFinishBaseline(include_dnf=False)`
+# （赛前 ρ=0.5849，高于这里的 0.5768）。README 两个分母都列，引用时必须说明用哪个。
+
+
+def same_complexity_pre():
+    """赛前对照：积分榜 + 练习赛（零拟合），与 best_pre 同复杂度但不含 Elo。"""
+    return RankBlend([(PointsBaseline(), 0.5), (PracticePaceBaseline(), 0.5)],
+                     "积分榜+练习赛")
+
+
+def same_complexity_post():
+    """赛后对照：发车格 + 排位秒差（零拟合），与 best_post 同复杂度但不含 Elo。"""
+    return RankBlend([(GridBaseline(), 0.3), (QualiGapBaseline(), 0.7)],
+                     "发车格+秒差")

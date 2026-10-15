@@ -56,6 +56,8 @@ class LapTimeline:
         self.states = states
         self.final = final
         self._stint_stats_cache: dict | None = None
+        # times(lap) 的按圈缓存 —— 见 times() 的 docstring
+        self._times_cache: dict[int, dict[str, float]] = {}
 
     def stint_stats(self) -> dict:
         """(车手, stint) 的稳健统计（中位数/MAD），用于交通离群判定。首次调用时计算。"""
@@ -90,9 +92,22 @@ class LapTimeline:
     # 数据来自 laps.time_sec（会话累计时间），由 scripts/backfill_lap_times.py 回填。
 
     def times(self, lap: int) -> dict[str, float]:
-        """该圈完成时刻的会话累计时间（秒）。仅返回有值的车手。"""
-        return {d: s["time_sec"] for d, s in self.states.get(lap, {}).items()
-                if s.get("time_sec") is not None}
+        """该圈完成时刻的会话累计时间（秒）。仅返回有值的车手。
+
+        结果**按圈缓存**：`states` 构造后不再变，所以 `times(lap)` 是纯函数。
+        回放导出在一帧内会反复问同一圈（`_lap_time_ref` 问两次、`_stalled`
+        每车问两次），实测 2026 R1 单次导出调用 2146 次、而不同的圈只有 58 个 ——
+        缓存后少建 2000 多个临时 dict。
+
+        ⚠️ **调用方不得修改返回的 dict**（它是缓存本体，不是副本）。
+        全部现有调用点都只读（`.get` / 遍历 / 下标），改坏它等于污染后续所有圈。
+        """
+        hit = self._times_cache.get(lap)
+        if hit is None:
+            hit = {d: s["time_sec"] for d, s in self.states.get(lap, {}).items()
+                   if s.get("time_sec") is not None}
+            self._times_cache[lap] = hit
+        return hit
 
     def gaps(self, lap: int) -> dict[str, float]:
         """相对领跑者的秒差。领跑者 = 该圈仍在跑且累计时间最小者。
@@ -174,7 +189,7 @@ class LapTimeline:
 
         传入 `predictor` 可换成更聪明的预测器（签名 `(tl, lap) -> list[str]`），
         用来量化「比赛中的信息值多少钱」。实测 `lappredict.PaceProjection`
-        在 gain=0.25 时中段 ρ 0.8017 vs 基线 0.7890（Δ+0.0128, t=+7.71）。
+        在 gain=0.25 时中段 ρ 0.8017 vs 基线 0.7890（Δ+0.0125, t=+7.57）。
 
         ⚠️ 分母口径：只在该圈**仍在跑**的车手之间算 ρ。已退赛者的最终名次其实
         已经确定（排最后），算进去等于白送分，曲线会虚高。

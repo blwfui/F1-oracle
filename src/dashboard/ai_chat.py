@@ -1,7 +1,9 @@
 """AI Chat — natural-language F1 data queries via LLM."""
 
+import json
+import logging
 import re
-import sqlite3
+from collections import OrderedDict
 from pathlib import Path
 
 import pandas as pd
@@ -11,7 +13,29 @@ from openai import OpenAI
 from common import DNF_SQL, FINISHED_SQL, is_dnf, is_finished
 from sql_guard import is_safe_sql as _is_safe_sql, open_readonly_db  # noqa: E402
 
+log = logging.getLogger(__name__)
+
 DB_PATH = Path(__file__).resolve().parent.parent.parent / "data" / "f1_oracle.db"
+
+# ═══════════════════════════════════════════════════════════
+# 硬边界（审查报告 E1）
+# ═══════════════════════════════════════════════════════════
+# 这几处以前是裸调用：7 个 client.chat.completions.create(...) 全都没有
+# timeout、也没有 max_retries。key 失效 / 429 / 断网会把 Streamlit 线程
+# 挂到 TCP 超时（几十秒到几分钟），用户看到的是一个死转的圈。
+# 边界集中在这里，7 处调用一起继承，不用逐个改。
+LLM_TIMEOUT_SEC = 60.0      # 单次请求上限
+LLM_MAX_RETRIES = 2         # SDK 自带指数退避；只对可重试错误生效
+
+# 喂给 LLM 的结果行数上限。`laps` 表 208,108 行 —— 一句 `SELECT * FROM laps`
+# 就能把上下文与账单同时打爆，而答案质量并不会因为多给 20 万行而变好。
+# 注意这是**唯一**一处"修了反而有小代价"的改动：给模型的行变少了。
+# 所以截断时必须在 prompt 里说明，否则它会拿前 200 行当全量下结论。
+MAX_RESULT_ROWS = 200
+
+# 图表规格缓存上限（LRU）。原先是个无界模块级 dict，且 docstring 里
+# 承诺的"缓存 1 小时"根本不存在 —— 进程活多久就涨多久，还跨会话共享。
+CHART_CACHE_MAX = 128
 
 # ═══════════════════════════════════════════════════════════
 # Database schema description (Chinese, for the LLM)
@@ -189,10 +213,17 @@ SCHEMA_PROMPT = (
 # ═══════════════════════════════════════════════════════════
 
 def _get_client() -> OpenAI:
+    """构造 LLM 客户端，**一律带上 timeout 与 max_retries**。
+
+    ⚠️ 这里省掉的每一个参数，都会在 key 失效 / 429 / 断网时变成一次
+    "整页无声卡死"。可以通过 `st.secrets["ai"]` 覆盖（timeout / max_retries）。
+    """
     cfg = st.secrets.get("ai", {})
     return OpenAI(
         api_key=cfg.get("api_key", "sk-unknown"),
         base_url=cfg.get("base_url", "https://api.deepseek.com"),
+        timeout=cfg.get("timeout", LLM_TIMEOUT_SEC),
+        max_retries=cfg.get("max_retries", LLM_MAX_RETRIES),
     )
 
 
@@ -225,12 +256,20 @@ def ask(question: str, history: list | None = None) -> str:
         # Skip assistant answers in SQL step — only questions matter for SQL generation
     messages.append({"role": "user", "content": f"请根据以下问题生成一条 SQLite 查询：\n\n{question}"})
 
-    sql_response = client.chat.completions.create(
-        model=model,
-        messages=messages,
-        temperature=0,
-        max_tokens=1000,
-    )
+    try:
+        sql_response = client.chat.completions.create(
+            model=model,
+            messages=messages,
+            temperature=0,
+            max_tokens=1000,
+        )
+    except Exception as e:
+        # 原版这里裸露：key 失效 / 429 / 断网直接让整页 500。
+        # 现在客户端带 timeout + max_retries，重试耗尽后落到这里，给人话不给堆栈。
+        log.exception("LLM 生成 SQL 失败")
+        return (f"❌ 调用模型失败：{type(e).__name__}: {e}\n\n"
+                f"（已重试 {LLM_MAX_RETRIES} 次，单次超时 {LLM_TIMEOUT_SEC:g}s。"
+                f"请检查 API key / 网络 / 额度。）")
     raw = sql_response.choices[0].message.content.strip()
 
     # If the model returned a knowledge answer (F1 but no SQL needed)
@@ -265,7 +304,15 @@ def ask(question: str, history: list | None = None) -> str:
         return f"📭 查询结果为空。SQL：\n```sql\n{sql}\n```"
 
     # ── Step 3: results → natural language (with full conversation context) ──
-    result_text = df.to_markdown(index=False)
+    # 截断不是"丢信息"是"挡爆炸"：`SELECT * FROM laps` 有 20 万行，
+    # 整段灌进 prompt 会把上下文和费用一起打爆。截断**必须显式告知模型**，
+    # 否则它会拿前 200 行当全量，得出"2024 年只有 200 条圈速"这种结论。
+    n_rows = len(df)
+    result_text = df.head(MAX_RESULT_ROWS).to_markdown(index=False)
+    if n_rows > MAX_RESULT_ROWS:
+        result_text += (f"\n\n（注意：查询共返回 {n_rows} 行，此处只给出前 "
+                        f"{MAX_RESULT_ROWS} 行。回答时不要把它当作全量结果，"
+                        f"如需要请说明这是部分数据。）")
     answer_messages = [
         {"role": "system", "content": "你是 F1 Oracle，专为一级方程式赛车数据设计的 AI 助手。根据查询结果用简洁的中文回答用户问题。可以补充分析见解，但不要编造数据。回答控制在 1-4 句话，自然流畅。"},
     ]
@@ -274,12 +321,18 @@ def ask(question: str, history: list | None = None) -> str:
         answer_messages.append(m)
     answer_messages.append({"role": "user", "content": f"用户问题：{question}\n\n查询结果：\n```\n{result_text}\n```\n\n请用中文回答。"})
 
-    answer_response = client.chat.completions.create(
-        model=model,
-        messages=answer_messages,
-        temperature=0.3,
-        max_tokens=800,
-    )
+    try:
+        answer_response = client.chat.completions.create(
+            model=model,
+            messages=answer_messages,
+            temperature=0.3,
+            max_tokens=800,
+        )
+    except Exception as e:
+        # SQL 已经跑出结果了，别让"总结失败"把结果也一起吞掉
+        log.exception("LLM 总结查询结果失败")
+        return (f"⚠️ 查询成功但生成回答失败（{type(e).__name__}: {e}）。"
+                f"原始结果：\n\n{result_text[:800]}")
     return answer_response.choices[0].message.content.strip()
 
 
@@ -314,6 +367,8 @@ def suggest_followups(question: str, answer: str, history: list | None = None) -
         questions = [line.strip().lstrip("0123456789.、-）) ") for line in raw.split("\n") if line.strip()]
         return questions[:3]
     except Exception:
+        # 追问是锦上添花，失败不该打断主回答 —— 但也不能不留痕（原版是静默 return []）
+        log.warning("生成追问失败，降级为空列表", exc_info=True)
         return []
 
 
@@ -425,16 +480,20 @@ CHART_SYSTEM_PROMPT = """你是 F1 数据可视化助手。用户用中文描述
 """
 
 
-_CHART_CACHE: dict[str, dict] = {}
+_CHART_CACHE: "OrderedDict[str, dict]" = OrderedDict()
 
 
 def ask_chart(description: str) -> dict | None:
     """Generate a chart spec from natural language description.
 
     Returns dict with keys: sql, chart_type, x, y, color, title, x_label, y_label, sort
-    Returns None on failure. Results are cached for 1 hour.
+    Returns None on failure.
+
+    缓存是 **LRU，上限 CHART_CACHE_MAX 条**。原版是个无界 dict，且 docstring 里
+    写着"缓存 1 小时" —— 那个 TTL 从来不存在，进程活多久表就涨多久，还跨会话共享。
     """
     if description in _CHART_CACHE:
+        _CHART_CACHE.move_to_end(description)   # LRU：命中即刷新
         return _CHART_CACHE[description]
     client = _get_client()
     model = _get_model()
@@ -454,7 +513,6 @@ def ask_chart(description: str) -> dict | None:
         raw = resp.choices[0].message.content.strip()
 
         # Extract JSON from possible markdown code block
-        import json
         m = re.search(r'```(?:json)?\s*\n?(.*?)```', raw, re.DOTALL | re.IGNORECASE)
         if m:
             raw = m.group(1).strip()
@@ -463,13 +521,21 @@ def ask_chart(description: str) -> dict | None:
 
         # Validate required keys
         if not spec.get("sql") or not spec.get("chart_type"):
+            log.warning("图表规格缺键，丢弃：%r", raw[:200])
             return None
         if not _is_safe_sql(spec["sql"]):
+            log.warning("图表 SQL 被安全守卫拒绝：%s", spec["sql"][:200])
             return None
 
         _CHART_CACHE[description] = spec
+        _CHART_CACHE.move_to_end(description)
+        while len(_CHART_CACHE) > CHART_CACHE_MAX:
+            _CHART_CACHE.popitem(last=False)
         return spec
     except Exception:
+        # 以前是裸 `except: return None` —— 静默。渲染层只会看到一个空图，
+        # 无从判断是网络、是 JSON 解析、还是守卫拦下了。至少留一条日志。
+        log.exception("生成图表规格失败：%r", description[:120])
         return None
 
 

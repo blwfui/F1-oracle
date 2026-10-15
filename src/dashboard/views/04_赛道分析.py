@@ -11,63 +11,66 @@ def render(year):
 
     @st.fragment
     def _track_fragment():
-        tracks = query(f"""
+        tracks = query("""
             SELECT DISTINCT location, country FROM events
-            WHERE year={year} ORDER BY country
-        """)
+            WHERE year = ? ORDER BY country
+        """, (year,))
         track_names = tracks["location"].tolist()
         selected_track = st.selectbox("选择赛道", track_names, format_func=_lname)
 
         # ── AI 赛道攻略 ────────────────────────────────────────
         st.subheader("📖 AI 赛道攻略")
-        if st.button("🤖 生成赛道攻略", key=f"guide_{selected_track}", use_container_width=True):
+        if st.button("🤖 生成赛道攻略", key=f"guide_{selected_track}", width="stretch"):
             from ai_chat import generate_track_guide
 
             with st.spinner("AI 正在分析历史数据…"):
                 # 只取完赛者：退赛者的 position 是按行驶距离分配的分类名次，
                 # 拿它算「位置变化」会得出「退赛=掉 6.8 位」的假信号。
                 # 注意不能用 `position IS NOT NULL` —— position 永不为 NULL，那样等于没过滤。
+                # 带值的查询一律走 params（审查报告 E2）。
+                # 唯一还能 f-string 插进 SQL 的是 `{FINISHED_SQL}` / `{DNF_SQL}` ——
+                # 那是 `common.py` 里的**代码常量 SQL 片段**，不是值，本来就无法参数化。
                 guide_overtaking = query(f"""
                     SELECT r.year, r.round, r.driver, r.full_name, r.team, r.grid, r.position
                     FROM results r JOIN events e USING(year, round)
-                    WHERE e.location='{selected_track}' AND {FINISHED_SQL}
+                    WHERE e.location = ? AND {FINISHED_SQL}
                         AND r.grid > 0 AND e.round > 0
                     ORDER BY r.year, r.round
-                """)
+                """, (selected_track,))
                 guide_tires = query(f"""
                     SELECT l.year, l.compound,
                            COUNT(*) as laps,
                            COUNT(DISTINCT l.driver) as driver_count
                     FROM laps l JOIN events e USING(year, round)
-                    WHERE e.location='{selected_track}' AND l.compound IS NOT NULL
+                    WHERE e.location = ? AND l.compound IS NOT NULL
                         AND l.compound != '' AND l.lap_time > 0 AND e.round > 0
                     GROUP BY l.year, l.compound
                     ORDER BY l.year, l.compound
-                """)
-                guide_weather = query(f"""
+                """, (selected_track,))
+                guide_weather = query("""
                     SELECT w.year, w.round, w.air_temp_avg, w.track_temp_avg,
                            w.humidity_avg, w.had_rain
                     FROM weather w JOIN events e USING(year, round)
-                    WHERE e.location='{selected_track}' AND e.round > 0
+                    WHERE e.location = ? AND e.round > 0
                     ORDER BY w.year
-                """)
-                guide_fastest = query(f"""
+                """, (selected_track,))
+                guide_fastest = query("""
                     SELECT l.year, l.driver, MIN(l.lap_time) as fastest, r.team
                     FROM laps l JOIN events e USING(year, round)
                     JOIN results r ON l.year=r.year AND l.round=r.round
                         AND l.driver COLLATE NOCASE = r.driver COLLATE NOCASE
-                    WHERE e.location='{selected_track}' AND l.lap_time > 0 AND e.round > 0
+                    WHERE e.location = ? AND l.lap_time > 0 AND e.round > 0
                     GROUP BY l.year, l.driver
                     ORDER BY fastest
-                """)
+                """, (selected_track,))
                 guide_dnf = query(f"""
                     SELECT r.year, r.status, COUNT(*) as count
                     FROM results r JOIN events e USING(year, round)
-                    WHERE e.location='{selected_track}' AND {DNF_SQL}
+                    WHERE e.location = ? AND {DNF_SQL}
                         AND e.round > 0
                     GROUP BY r.year, r.status
                     ORDER BY count DESC
-                """)
+                """, (selected_track,))
                 guide_data = {
                     "overtaking": guide_overtaking,
                     "tire_usage": guide_tires,
@@ -84,9 +87,9 @@ def render(year):
         track_res = query(f"""
             SELECT r.position, r.driver, r.team, r.points, r.status
             FROM results r JOIN events e USING(year, round)
-            WHERE r.year={year} AND e.location='{selected_track}'
+            WHERE r.year = ? AND e.location = ?
             ORDER BY r.position
-        """)
+        """, (year, selected_track))
         if not track_res.empty:
             track_res["车手"] = track_res["driver"].apply(_dname)
             track_res["车队"] = track_res["team"].apply(_tname)
@@ -124,9 +127,9 @@ def render(year):
             FROM laps l JOIN events e USING(year, round)
             JOIN results r ON l.year=r.year AND l.round=r.round
                 AND l.driver COLLATE NOCASE = r.driver COLLATE NOCASE
-            WHERE l.year={year} AND e.location='{selected_track}' AND l.lap_time>0
+            WHERE l.year = ? AND e.location = ? AND l.lap_time > 0
             GROUP BY l.driver ORDER BY fastest
-        """)
+        """, (year, selected_track))
         if not track_fl.empty:
             track_fl["车手"] = track_fl["driver"].apply(_dname)
             track_fl["圈速文本"] = track_fl["fastest"].apply(
@@ -152,7 +155,7 @@ def render(year):
                 yaxis=dict(autorange="reversed"), showlegend=False,
                 xaxis=dict(tickmode="array", tickvals=ticks.tolist(),
                             ticktext=tick_labels, title="圈速"))
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width="stretch")
 
         st.subheader("赛季赛程表")
         cal = query(f"""

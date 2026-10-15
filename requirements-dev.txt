@@ -6,4 +6,5 @@
 # 测试**不需要数据库**（用内存 SQLite 夹具），也不会联网：
 # 所以 CI 上不需要建库，就没有 28 MB 二进制的分发问题。
 -r requirements.txt
-pytest>=8.0
+# 上界策略同 requirements.txt：让升级成为有意识的决定，而不是 pip -U 的副作用。
+pytest>=8,<10

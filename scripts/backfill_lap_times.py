@@ -132,6 +132,11 @@ def pending_races(db: sqlite3.Connection, year: int | None) -> list[tuple[int, i
 def coverage(db: sqlite3.Connection) -> None:
     print("\n=== 覆盖率 ===")
     total = db.execute("SELECT COUNT(*) FROM laps").fetchone()[0]
+    if not total:
+        # 审查报告 E6：空库上这里会 ZeroDivisionError —— 恰好在**最需要诊断**
+        # 的时候（库还没建好）崩掉。空就是空，说明白就行。
+        print("  laps 表为空 —— 还没导入任何圈速数据（先跑 scripts/import_season.py）")
+        return
     for col in NEW_COLUMNS:
         n = db.execute(f"SELECT COUNT({col}) FROM laps").fetchone()[0]
         print(f"  {col:16s} {n:>7,} / {total:>7,}  = {n / total * 100:5.1f}%")

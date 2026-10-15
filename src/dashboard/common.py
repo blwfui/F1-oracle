@@ -94,17 +94,26 @@ def _query_stats():
 
 
 @st.cache_data
-def query(sql: str) -> pd.DataFrame:
+def query(sql: str, params: tuple = ()) -> pd.DataFrame:
     """Run a read-only SQL query against the F1 data warehouse.
 
+    ⚠️ **任何带值的查询一律走 `params`，不要用 f-string 拼进 SQL。**
+
+    审查报告 E2：视图里曾有 11 处 `... WHERE r.driver='{selected_driver}'`。
+    那些插值源当前都取自库内可信值（下拉框的选项来自本库），所以**不是已可利用
+    的注入** —— 但它是一颗"哪天加个输入框就变成真注入"的地雷，而 `params` 是
+    零成本的拆弹方式。整数同样走 `?`：省得以后有人去分辨哪个能拼哪个不能。
+
+        query("SELECT ... WHERE year = ? AND driver = ?", (year, driver))
+
     Results are cached for the entire session (data is read-only, no TTL needed).
-    Same SQL returns instantly on reruns.
+    Same SQL **与同一组 params** 在重跑时瞬时返回（params 进缓存键）。
     """
     global _query_misses, _query_total_ms
     _query_misses += 1
     t0 = time.perf_counter()
     db = _get_connection()
-    result = pd.read_sql_query(sql, db)
+    result = pd.read_sql_query(sql, db, params=list(params))
     elapsed = (time.perf_counter() - t0) * 1000
     _query_total_ms += elapsed
     return result

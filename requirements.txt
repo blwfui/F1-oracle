@@ -1,9 +1,29 @@
-fastf1>=3.3.0
-pandas>=2.0
-numpy>=1.24
-streamlit>=1.35
-plotly>=5.20
-requests>=2.32
-pyarrow>=15.0
-openai>=1.0
-tabulate>=0.9
+# 运行时依赖
+#
+#   pip install -r requirements.txt
+#   pip install -r requirements.txt -r requirements-dev.txt   # 含测试
+#
+# ── 版本策略（审查报告 E2）────────────────────────────────────
+# 原版**只有下界、没有上界、也没有锁文件**：任何一次 `pip install -U` 都可能
+# 把项目升到某个大版本，然后一次性碎掉一片。已经踩到的那颗雷是 Streamlit：
+# 29 处 `use_container_width` 在 1.57 被弃用、**计划 2025-12-31 移除**，
+# 而 `streamlit>=1.35` 允许升到任意新版 —— 升级当天 29 处同时失效。
+#
+# 现在：① 下界提到「本仓库实际测过的最低版本」；② 加大版本上界，
+# 让升级变成一次**有意识的决定**（改这一行）而不是某天 `pip -U` 的副作用。
+# 升级流程：改上界 → 跑 `pytest` → 跑 `python -m scripts.verify_claims`。
+fastf1>=3.3,<4
+pandas>=2.0,<3
+numpy>=1.24,<3
+streamlit>=1.57,<2      # 下界=1.57：本仓库已改用 `width="stretch"`，
+                        # 旧的 `use_container_width` 是弃用参数，不要再回退
+plotly>=5.20,<7
+requests>=2.32,<3
+openai>=1.0,<3
+tabulate>=0.9,<1
+python-docx>=1.1,<2     # scripts/gen_docx.py 直接依赖；此前漏列，装完就 ImportError
+
+# pyarrow 本仓库**没有任何一行 import**，但 Streamlit 的数据帧渲染层要用它
+# （`st.dataframe` 走 Arrow 序列化）。保留是免得它变成"看起来多余、删了就崩"。
+# 下界跟着 Streamlit 走，不要单独往上顶 —— 顶太高会和 Streamlit 自己的约束打架。
+pyarrow>=15

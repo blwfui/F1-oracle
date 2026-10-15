@@ -11,31 +11,40 @@ def render(year):
 
     @st.fragment
     def _driver_fragment():
-        drivers = query(f"""
-            SELECT DISTINCT driver, full_name FROM results WHERE year={year}
+        drivers = query("""
+            SELECT DISTINCT driver, full_name FROM results WHERE year = ?
             ORDER BY driver
-        """)
+        """, (year,))
         selected_driver = st.selectbox("选择车手", drivers["driver"].tolist(),
                                         format_func=lambda d: _dname(d))
 
-        stats = query(f"""
+        # 带值的查询一律走 params（审查报告 E2），不要拼字符串。
+        # ⚠️ `int(stats["pts"])` 曾经会崩：SQLite 里 `SUM(x) + COALESCE(...,0)`
+        # 在 x 全为 NULL 时仍是 NULL（COALESCE 只包了子查询），转 int 直接
+        # TypeError。这里两层都包住，并且退回 0 —— 一个没得分的车手，积分就是 0。
+        stats = query("""
             SELECT COUNT(*) as races,
-                   SUM(r.points) + COALESCE(
-                     (SELECT SUM(sp.points) FROM sprint_points sp
-                      WHERE sp.driver='{selected_driver}' AND sp.year={year}), 0) as pts,
+                   COALESCE(
+                     SUM(r.points)
+                     + (SELECT SUM(sp.points) FROM sprint_points sp
+                        WHERE sp.driver = ? AND sp.year = ?), 0) as pts,
                    SUM(CASE WHEN r.position=1 THEN 1 ELSE 0 END) as wins,
                    SUM(CASE WHEN r.position<=3 THEN 1 ELSE 0 END) as podiums,
                    ROUND(AVG(r.grid), 1) as avg_grid,
                    ROUND(AVG(r.position), 1) as avg_fin
-            FROM results r WHERE r.year={year} AND r.driver='{selected_driver}'
-        """).iloc[0]
+            FROM results r WHERE r.year = ? AND r.driver = ?
+        """, (selected_driver, year, year, selected_driver)).iloc[0]
+
+        def _num(v) -> int:
+            """SQL 聚合可能给出 NULL（该车手该赛季没得过分）—— 当 0，不要崩。"""
+            return 0 if v is None or v != v else int(v)
 
         c1, c2, c3, c4, c5, c6 = st.columns(6)
         stats_items = [
-            ("🏁", "参赛", int(stats["races"])),
-            ("📊", "积分", int(stats["pts"])),
-            ("🏆", "冠军", int(stats["wins"])),
-            ("🏅", "领奖台", int(stats["podiums"])),
+            ("🏁", "参赛", _num(stats["races"])),
+            ("📊", "积分", _num(stats["pts"])),
+            ("🏆", "冠军", _num(stats["wins"])),
+            ("🏅", "领奖台", _num(stats["podiums"])),
             ("📍", "平均发车", stats["avg_grid"]),
             ("🏎️", "平均完赛", stats["avg_fin"]),
         ]
@@ -48,12 +57,12 @@ def render(year):
                     unsafe_allow_html=True)
 
         st.subheader("各站成绩")
-        dres = query(f"""
+        dres = query("""
             SELECT r.round, e.event_name, r.position, r.grid, r.points, r.status
             FROM results r JOIN events e USING(year, round)
-            WHERE r.year={year} AND r.driver='{selected_driver}'
+            WHERE r.year = ? AND r.driver = ?
             ORDER BY r.round
-        """)
+        """, (year, selected_driver))
         dres["站"] = dres["round"].apply(lambda x: f"第{NUM_CN[x]}站")
         dres["比赛"] = dres["event_name"].apply(_ename)
         dres["状态"] = dres["status"].apply(lambda s: STATUS_CN.get(str(s), str(s)))
@@ -114,15 +123,15 @@ def render(year):
                                   spikecolor="rgba(128,128,128,0.4)", dtick=1)
                 fig.add_hline(y=3, line_dash="dash", line_color="rgba(0,0,0,0.3)",
                               annotation_text="领奖台", annotation_position="top right")
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width="stretch")
 
         with col_b:
             st.subheader("各站最快圈速")
-            fl = query(f"""
+            fl = query("""
                 SELECT round, MIN(lap_time) as fastest
-                FROM laps WHERE year={year} AND driver='{selected_driver}' AND lap_time>0
+                FROM laps WHERE year = ? AND driver = ? AND lap_time > 0
                 GROUP BY round ORDER BY round
-            """)
+            """, (year, selected_driver))
             if not fl.empty:
                 fl["圈速文本"] = fl["fastest"].apply(
                     lambda s: f"{int(s//60)}:{s%60:06.3f}"
@@ -144,6 +153,6 @@ def render(year):
                     yaxis=dict(tickmode="array", tickvals=ticks.tolist(),
                                 ticktext=tick_labels, title="圈速"),
                     xaxis=dict(title="站", dtick=1))
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width="stretch")
 
     _driver_fragment()

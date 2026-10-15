@@ -19,6 +19,7 @@
 """
 
 import argparse
+import html
 import json
 import math
 import sqlite3
@@ -78,6 +79,34 @@ def _point_at(points, cum, t: float) -> tuple[float, float]:
 # ── 数据 ────────────────────────────────────────────────────────────
 
 STALL_SECONDS = 300.0
+
+
+def js_json(obj) -> str:
+    """序列化成**能安全嵌进 `<script>`** 的 JSON。
+
+    审查报告 E3：原来这里直接 `json.dumps(...)` 后用 `str.replace` 塞进模板。
+    `json.dumps` 会把 `</script>` 原样输出，浏览器在那里**就地结束脚本块** ——
+    整页 JS 废掉，而且不报错、只是白屏。`U+2028` / `U+2029` 同理：
+    在 JSON 里合法，在 JS 字符串字面量里却是换行。
+
+    `<` / `>` / `&` 一律转成 `\\uXXXX`（同 Django 的 `json_script` 做法）。
+    转义序列在 JSON 与 JS 里都合法，所以 `json.loads` 能原样还原。
+    """
+    return (json.dumps(obj, ensure_ascii=False)
+            .replace("<", "\\u003c")
+            .replace(">", "\\u003e")
+            .replace("&", "\\u0026")
+            .replace("\u2028", "\\u2028")
+            .replace("\u2029", "\\u2029"))
+
+
+def html_esc(text) -> str:
+    """把库内文本放进 HTML 前转义。
+
+    ⚠️ 不要因为"数据是自己抓的"就省这一步：`event_name` / `location` / `country`
+    来自 FastF1 上游，不是我们写的常量，本仓库也无权保证其内容。
+    """
+    return html.escape(str(text), quote=True)
 
 
 def _lap_time_ref(tl, lap: int) -> float:
@@ -970,18 +999,18 @@ def main():
     mm, ss = divmod(rem, 60_000)
     duration = (f"{hh}:{mm:02d}:{ss // 1000:02d}" if hh
                 else f"{mm}:{ss // 1000:02d}")
-    html = (TEMPLATE
-            .replace("__TITLE__", title)
-            .replace("__EVENT__", f"{data['year']} {data['event']}")
-            .replace("__SUBTITLE__", subtitle)
-            .replace("__TOTAL__", str(data["total_laps"]))
-            .replace("__DURATION__", duration)
-            .replace("__DATA__", json.dumps(data, ensure_ascii=False)))
+    html_out = (TEMPLATE
+                .replace("__TITLE__", html_esc(title))
+                .replace("__EVENT__", html_esc(f"{data['year']} {data['event']}"))
+                .replace("__SUBTITLE__", html_esc(subtitle))
+                .replace("__TOTAL__", str(int(data["total_laps"])))
+                .replace("__DURATION__", html_esc(duration))
+                .replace("__DATA__", js_json(data)))
 
     out = Path(args.out) if args.out else (
         ROOT / "outputs" / f"replay_{data['year']}_R{data['round']:02d}.html")
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(html, encoding="utf-8")
+    out.write_text(html_out, encoding="utf-8")
     print(f"✓ {data['year']} R{data['round']} {data['event']}")
     print(f"  {data['circuit']} · {data['total_laps']} 圈 · "
           f"{len(data['drivers'])} 车手 · {len(data['frames'])} 帧")

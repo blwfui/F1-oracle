@@ -139,7 +139,7 @@ def _render_chart(spec: dict):
     fig.update_yaxes(showspikes=True, spikemode="across", spikesnap="cursor",
                      spikethickness=1, spikecolor="rgba(128,128,128,0.4)")
 
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
 
 def _process(prompt: str):
@@ -188,7 +188,7 @@ def _render_followups():
     cols = st.columns(3)
     for i, q in enumerate(followups):
         with cols[i]:
-            if st.button(q, key=f"followup_{i}", use_container_width=True):
+            if st.button(q, key=f"followup_{i}", width="stretch"):
                 st.session_state.followups = []
                 _process(q)
                 st.rerun()
@@ -215,7 +215,7 @@ def render(year):
         cols = st.columns(2)
         for i, (icon, q) in enumerate(PRESETS):
             with cols[i % 2]:
-                if st.button(f"{icon}  {q}", key=f"preset_{i}", use_container_width=True):
+                if st.button(f"{icon}  {q}", key=f"preset_{i}", width="stretch"):
                     _process(q)
                     st.rerun()
 
@@ -223,7 +223,7 @@ def render(year):
         cols = st.columns(2)
         for i, (icon, q) in enumerate(CHART_PRESETS):
             with cols[i % 2]:
-                if st.button(f"{icon}  {q}", key=f"chart_preset_{i}", use_container_width=True):
+                if st.button(f"{icon}  {q}", key=f"chart_preset_{i}", width="stretch"):
                     _process(q)
                     st.rerun()
 

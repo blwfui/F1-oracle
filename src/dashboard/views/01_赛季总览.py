@@ -44,7 +44,7 @@ def render(year):
                       texttemplate="%{text:.0f}", textposition="outside",
                       textfont=dict(color="#555555", size=11))
     fig.update_yaxes(categoryarray=drv_order)
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
     st.subheader("车队积分榜")
     raw_team = query(f"""
@@ -64,7 +64,7 @@ def render(year):
 
     # ── AI 赛季回顾 ──────────────────────────────────────────
     st.subheader("📝 AI 赛季回顾")
-    if st.button("🤖 生成赛季回顾", key=f"season_review_{year}", use_container_width=True):
+    if st.button("🤖 生成赛季回顾", key=f"season_review_{year}", width="stretch"):
         from ai_chat import generate_season_review
 
         with st.spinner("AI 正在回顾整个赛季…"):
@@ -109,7 +109,7 @@ def render(year):
                       texttemplate="%{text:.0f}", textposition="outside",
                       textfont=dict(color="#555555", size=11))
     fig.update_yaxes(categoryarray=team_order)
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
     st.subheader("车手数据明细")
     raw_drv["车手全名"] = raw_drv["driver"].apply(_dfull)
@@ -139,15 +139,18 @@ def render(year):
 
     st.subheader("冠军积分争夺走势")
     top5 = raw_drv.sort_values(["pts", "podiums", "wins"], ascending=False).head(5)["driver"].tolist()
+    # `{ph}` 是 `?` 占位符串，只由 len(top5) 决定、与数据无关 —— 这是这把
+    # f-string 唯一允许的用法。车手代号本身走 params（审查报告 E2）。
+    ph = ",".join("?" * len(top5))
     ev = query(f"""
         SELECT r.round, r.driver, r.points, e.event_name,
                SUM(r.points) OVER (PARTITION BY r.driver ORDER BY r.round) +
                COALESCE((SELECT SUM(sp.points) FROM sprint_points sp
                          WHERE sp.driver COLLATE NOCASE = r.driver COLLATE NOCASE
-                         AND sp.year={year} AND sp.round <= r.round), 0) as total
+                         AND sp.year = ? AND sp.round <= r.round), 0) as total
         FROM results r JOIN events e USING(year, round)
-        WHERE r.year={year} AND r.driver IN ({','.join(repr(d) for d in top5)})
-    """)
+        WHERE r.year = ? AND r.driver IN ({ph})
+    """, (year, year, *top5))
     ev["车手"] = ev["driver"].apply(_dname)
     ev["车手简"] = ev["driver"].apply(_dfull)
     ev["站名"] = ev["event_name"].apply(_ename)
@@ -173,4 +176,4 @@ def render(year):
                       hovermode="x unified")
     fig.update_xaxes(showspikes=True, spikemode="across", spikesnap="cursor",
                      spikethickness=1, spikecolor="rgba(128,128,128,0.4)")
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
