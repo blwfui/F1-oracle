@@ -9,6 +9,7 @@ import streamlit as st
 from openai import OpenAI
 
 from common import DNF_SQL, FINISHED_SQL, is_dnf, is_finished
+from sql_guard import is_safe_sql as _is_safe_sql, open_readonly_db  # noqa: E402
 
 DB_PATH = Path(__file__).resolve().parent.parent.parent / "data" / "f1_oracle.db"
 
@@ -177,26 +178,10 @@ SCHEMA_PROMPT = (
 # ═══════════════════════════════════════════════════════════
 # Safety check
 # ═══════════════════════════════════════════════════════════
-
-def _is_safe_sql(sql: str) -> bool:
-    """Reject any SQL that isn't a read-only SELECT."""
-    cleaned = sql.strip().upper()
-    # Remove leading comments
-    cleaned = re.sub(r'--.*?\n', '', cleaned)
-    cleaned = re.sub(r'/\*.*?\*/', '', cleaned, flags=re.DOTALL)
-    cleaned = cleaned.strip()
-
-    if not cleaned.startswith("SELECT"):
-        return False
-
-    # Block dangerous keywords even inside SELECT
-    dangerous = ["INSERT", "UPDATE", "DELETE", "DROP", "ALTER",
-                 "CREATE", "ATTACH", "DETACH", "PRAGMA"]
-    for word in dangerous:
-        if re.search(rf'\b{word}\b', cleaned):
-            return False
-
-    return True
+# 实现已迁到 src/dashboard/sql_guard.py（单独成模块才能被测试直接覆盖，
+# 不用把 streamlit / openai 拖进测试）。这里只做 re-export。
+# 迁移原因见那个模块的 docstring：旧版本**误拦** WITH…SELECT（CTE），
+# 却**放行** SELECT load_extension(...) / writefile(...)。
 
 
 # ═══════════════════════════════════════════════════════════
@@ -267,7 +252,10 @@ def ask(question: str, history: list | None = None) -> str:
 
     # ── Step 2: execute SQL ──
     try:
-        db = sqlite3.connect(str(DB_PATH), check_same_thread=False)
+        # ⚠️ 用**只读连接 + authorizer**（见 src/dashboard/sql_guard.py）：
+        # 文本守卫只是第一层；即使被绕过，SQLite 层面也写不进去、也调不了
+        # load_extension / writefile。原来这里是普通 connect，等于赌正则不出错。
+        db = open_readonly_db()
         df = pd.read_sql_query(sql, db)
         db.close()
     except Exception as e:

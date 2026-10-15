@@ -22,6 +22,10 @@ data/*.log
 outputs/
 
 # Temp files
+# 注意：`*.txt` 会连依赖清单一起吞掉 —— GitHub 上 CI 第一步就要
+# `pip install -r requirements-dev.txt`，文件不在仓库里会直接失败。
 *.txt
+!requirements.txt
+!requirements-dev.txt
 !docs/*.txt
 db_output.txt

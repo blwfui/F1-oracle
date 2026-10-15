@@ -155,16 +155,29 @@ python -m scripts.export_replay 2023 3     # 2023 年第 3 站（轮次，不是
 `outputs/` 是生成物，不入库。**生成步骤、维修区几何怎么抽、「换成你自己的赛季 / 赛道 / 语言」
 改哪里，见 [回放动画指南](docs/replay-guide.md)。**
 
+### 测试
+
+```bash
+pip install -r requirements-dev.txt
+pytest                     # 92 项，约 3 秒
+```
+
+测试**不需要数据库、也不联网**（内存 SQLite 夹具），跑的全是已经踩过的坑：
+完赛/退赛语义的两套实现必须逐字一致、最快圈积分规则按年份、车队血缘分并、
+回测框架的防泄漏结构、AI 查询守卫的真值表（含 CTE 与 `load_extension`）、
+入库完整性判据。CI 在 `.github/workflows/ci.yml`。
+
 ### 项目结构
 
 ```
 src/
   semantics.py      完赛/退赛语义的唯一定义 —— eval / etl / model 所有判定都走这里
-  etl/              取数与建库（FastF1 -> SQLite），含赛道维表
-  model/            预测层：回测框架 / 预测器库 / 逐圈分析 / 脏圈识别
+  etl/              取数与建库（FastF1 -> SQLite），含赛道维表与积分规则
+  model/            预测层：回测框架 / 预测器库 / 逐圈分析 / 脏圈识别 / 车队身份
   dashboard/        Streamlit 界面，六个页面
 scripts/            回测、导入、评估、演示等命令行工具
-docs/               评估报告、对标分析与回放动画指南
+tests/              回归测试（不需要数据库）
+docs/               评估报告、对标分析、审查报告与回放动画指南
 ```
 
 `src/model/` 的防泄漏是**结构性**的：`make_context()` 按预测时点（`pre_quali` / `post_quali`）
@@ -393,16 +406,31 @@ python -m scripts.export_replay 2023 3     # 2023, round 3 (round number, not a 
 pit-lane geometry is extracted, and which knobs to turn to swap in your own season / circuit /
 language, see the [replay guide](docs/replay-guide.md).**
 
+### Tests
+
+```bash
+pip install -r requirements-dev.txt
+pytest                     # 92 tests, ~3 seconds
+```
+
+The tests need **no database and no network** (in-memory SQLite fixtures). They cover the
+mistakes that have already bitten this project: the two implementations of finish/DNF semantics
+must agree exactly, the fastest-lap points rule by season, team-lineage collapsing, the
+backtest framework's structural leakage guards, the AI SQL guard's truth table (including CTEs
+and `load_extension`), and the ingestion completeness criteria.
+CI lives in `.github/workflows/ci.yml`.
+
 ### Layout
 
 ```
 src/
   semantics.py      single source of truth for finished/DNF semantics — used by every layer
-  etl/              ingestion (FastF1 -> SQLite), including the circuit dimension table
-  model/            prediction layer: backtest framework / predictors / lap analysis / dirty-lap detection
+  etl/              ingestion (FastF1 -> SQLite), incl. circuit dimension table & points rules
+  model/            prediction layer: backtest framework / predictors / lap analysis / dirty-lap detection / team identity
   dashboard/        Streamlit UI, six pages
 scripts/            backtest, ingest, evaluation and demo CLIs
-docs/               evaluation reports, benchmark analyses and the replay guide
+tests/              regression tests (no database needed)
+docs/               evaluation reports, benchmarks, audit report and the replay guide
 ```
 
 Leakage prevention in `src/model/` is **structural**: `make_context()` decides which fields

@@ -1,0 +1,9 @@
+# 开发/测试依赖（运行时不装这些也能跑仪表板与回放）
+#
+#   pip install -r requirements.txt -r requirements-dev.txt
+#   pytest
+#
+# 测试**不需要数据库**（用内存 SQLite 夹具），也不会联网：
+# 所以 CI 上不需要建库，就没有 28 MB 二进制的分发问题。
+-r requirements.txt
+pytest>=8.0
