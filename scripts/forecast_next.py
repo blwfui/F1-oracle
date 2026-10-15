@@ -21,6 +21,7 @@ sys.path.insert(0, str(ROOT))
 
 from src.model.backtest import Entry, Race, load_races, make_context  # noqa: E402
 from src.model.predictors import EloPredictor, PointsBaseline, RankBlend  # noqa: E402
+from src.model.teams import canonical_team  # noqa: E402
 
 sys.path.insert(0, str(ROOT / "src" / "dashboard"))
 from names_cn import auto_cn_short  # noqa: E402
@@ -108,13 +109,23 @@ def main():
         print(f"    {auto_cn_short(d, name_of[d]):<20} Elo 第 {r_elo[d]:>2} 名"
               f" ｜ 积分榜第 {r_pts[d]:>2} 名 ｜ 差 {g} 位")
 
-    # ── 车队 Elo 实力榜（解释为什么某些车手评分高） ─────────────
-    teams = sorted({e.team for e in entries}, key=lambda t: -elo.team.get(t, elo.base))
-    print("\n  车队 Elo 实力榜（模型认为的赛车+车队综合能力）")
+    # ── 车队 Elo ─────────────────────────────────────────────────
+    # ⚠️ 这是**相对车手的残差**，不是赛车的纯速度：一队两台车，车手与赛车的贡献
+    #    无法分离，driver_share 决定这两份账怎么记（0.7 → 车手七成、车队三成）。
+    #    它不该被拿来论证某位车手「该排第几」（详见 predictors.EloPredictor）。
+    teams = sorted({canonical_team(e.team) for e in entries},
+                   key=lambda t: -elo.team.get(t, elo.base))
+    print("\n  车队 Elo（按**物理车队**累计：Force India → Racing Point → Aston Martin 是一支队）")
     for t in teams:
         v = elo.team.get(t, elo.base)
         bar = "█" * max(0, int((v - 1400) / 8))
         print(f"    {t:<20}{v:>7.1f}  {bar}")
+
+    print("\n  ⚠️ 上面「Elo强度」= 车手分 +（车队分 − 1500）。两个分量出自同一模型、")
+    print("     互相补偿，**不可相加来论证名次** —— 车队分是相对车手的残差：")
+    print("     车手分越高，同样的成绩越会被算作「车不行」。实测 driver_share")
+    print("     对预测几乎无影响（k=192 下 0.5→0.9，ρ 跨度仅 0.0035），它决定的是")
+    print("     哪张表更忠实，不是谁更强。")
 
 
 if __name__ == "__main__":

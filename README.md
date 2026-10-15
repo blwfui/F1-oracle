@@ -76,7 +76,7 @@ k = 192 的衰减速度需要好几站才能把旧信息冲掉 —— 17 站显�
 | 分站 | 190 |
 | 圈速记录 | 208,108 |
 | 赛道（含几何与进站损失） | 31 |
-| 车手 / 车队 | 44 / 19 |
+| 车手 / 车队 | 44 / 19 个队名（= **11 支物理车队**，改名已归并） |
 | 存储 | 单个 SQLite 文件，28 MB |
 
 数据来自 [FastF1](https://github.com/theOehrly/FastF1)。
@@ -164,6 +164,11 @@ docs/               评估报告、对标分析与回放动画指南
 - **冠军几乎猜不准** —— 上限约 49–55%，被比赛内的随机事件封死。价值在排序，不在猜冠军
 - **2026 新规年的结论还不够硬** —— 去 Elo 更好只领先 0.0119，17 场不足以定论
 - **后段（真实第 16–20 名）误差约为前段的 3 倍** —— 这正是对外应看前 10 口径的原因
+- **「车手分 + 车队分」不能当解释用** —— 一队两台车，车手与赛车的贡献**无法分离**。
+  分成比例 `driver_share` 对预测几乎无影响（实测 0.5→0.9，ρ 跨度仅 0.0035），
+  它决定的是**哪张表更忠实**（零和的）。车队分是**相对车手的残差**：车手分越高，
+  同样的成绩越会被算作「车不行」。2026 的 Williams 就是这个形状 —— 两台车都被评成
+  好车手，车队分被压到垫底，尽管它的平均完赛名次好于 Aston Martin 和 Cadillac
 - **冲刺积分与正赛积分分表存储**，未合并（为保持与历史数据可比）
 
 更详细的分析见 [`docs/`](docs/)：2026 新规年评估、与开源项目的同场同口径对标。
@@ -266,7 +271,7 @@ into a **measurable number**.
 | Grands Prix | 190 |
 | Lap records | 208,108 |
 | Circuits (with geometry + pit loss) | 31 |
-| Drivers / Teams | 44 / 19 |
+| Drivers / Teams | 44 / 19 team names (= **11 physical teams**; renames merged) |
 | Storage | single SQLite file, 28 MB |
 
 Data from [FastF1](https://github.com/theOehrly/FastF1).
@@ -363,6 +368,13 @@ For a real language **toggle** rather than a straight replacement, add a locale-
 - **The 2026 finding is not yet conclusive** — dropping Elo wins by only 0.0119 over 17 races
 - **The back of the field (actual P16–P20) has ~3× the error of the front** — the reason the
   top-10 view is the one worth quoting
+- **"Driver rating + team rating" is not an explanation** — with two cars per team, driver and
+  car contributions are **not separately identifiable**. The split (`driver_share`) barely moves
+  prediction (0.5→0.9 spans just 0.0035 of ρ) — what it decides is **which table stays faithful**,
+  and that trade is zero-sum. The team rating is a **residual against its drivers**: the higher a
+  driver is rated, the more the same result gets blamed on the car. Williams in 2026 is exactly
+  this shape — both its drivers rate well, so the team rating sinks to last even though its
+  average finish beats Aston Martin's and Cadillac's
 - **Sprint and race points are stored separately**, not merged (kept comparable with history)
 
 See [`docs/`](docs/) for the detailed analyses: the 2026 regulation-year evaluation and a

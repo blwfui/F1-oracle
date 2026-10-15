@@ -12,6 +12,7 @@ from __future__ import annotations
 import random
 
 from .backtest import Entry, Race, Round
+from .teams import canonical_team
 
 
 # ═══════════════════════════════════════════════════════════
@@ -287,6 +288,26 @@ class EloPredictor:
         Δ_i = K/(n−1) · Σ(S − E)，再按 driver_share 拆给车手与车队。
         K/(n−1) 的缩放让每人每站的总变动量级与标准 Elo 可比。
 
+    车队按**物理车队**累计（见 src/model/teams.py）：Force India → Racing Point
+        → Aston Martin 是同一支队。不归并的话每改一次名就等于新开一支车队、
+        从 base 重新学，历史被一笔勾销 —— 实测会攒出 19 条队名（应为 11），
+        前十名里挂着四个一辆车都没在跑的旧名字。
+
+    ⚠️ 怎么读「车手分 / 车队分」—— 以下都是实测结论，别拿它当解释用
+        一队两台车，**车手与赛车的贡献无法分离**；driver_share 决定这两份账
+        怎么记，而实测它对预测几乎没影响：k=192 下从 0.5 扫到 0.9，
+        ρ 只在 0.5893–0.5928 之间（跨度 0.0035）。所以：
+          · 别为 driver_share 调参 —— 它调不动预测。
+          · 车队分是**相对车手的残差**，不是赛车的纯速度。车手分越高，同样的
+            成绩越会被算作「车不行」，车队分越被压 —— 而且会自激。2026 的
+            Williams 就是这个形状：两台车都被评成好车手（车手榜 P9 / P12），
+            车队分被压到全场垫底，尽管它的平均完赛名次（15.71，11 队第 9）
+            好于 Aston Martin（17.41）和 Cadillac（17.85）。
+          · driver_share 真正决定的是**哪张表更忠实**，且是零和的：2026 实测
+            名次比对 —— 0.3 时车队表 ρ=0.927 / 车手表 0.638；0.9 时反过来
+            0.800 / 0.880。0.7 是均衡档。
+          · 因此「车手分 + 车队分」**不能相加来论证某位车手该排第几**。
+
     dnf_policy
         "as_position"    退赛者按分类名次参与（等价于"输给所有完赛者"）
         "finishers_only" 只用完赛者之间的对决；退赛者本场不动评分
@@ -317,7 +338,7 @@ class EloPredictor:
         d = self.driver.get(driver, self.base)
         if not self.use_team:
             return d
-        return d + (self.team.get(team, self.base) - self.base)
+        return d + (self.team.get(canonical_team(team), self.base) - self.base)
 
     def predict(self, ctx: Round) -> list[str]:
         team_of = ctx.team_of
@@ -331,7 +352,9 @@ class EloPredictor:
             return
 
         s = {e.driver: self.strength(e.driver, e.team) for e in order}
-        team_of = {e.driver: e.team for e in order}
+        # 车队按物理实体累计 —— 历史队名先收敛到现在的名字。否则每改一次名
+        # 就等于新开一支车队、从 base 重新学，历史被一笔勾销（见 teams.py）。
+        team_of = {e.driver: canonical_team(e.team) for e in order}
         fin = {e.driver: race.truth[e.driver].finished for e in order}
         step = self.k / (n - 1)
         delta = {d: 0.0 for d in s}

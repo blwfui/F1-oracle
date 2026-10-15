@@ -206,6 +206,10 @@ DRIVER_FULL_CN = {
     "WHA": "沃",
 }
 
+# 车队展示名。刻意把**历史上每个名字**都收进来 —— 图上显示的是当时的队名，
+# 2020 年那台车是 Racing Point，不是 Aston Martin，不该被"归并"成现在的名字。
+# 需要「同一支队的血缘」时用 src/model/teams.py 的 TEAM_ALIAS / canonical_team()
+# —— 那是车队评分用的（Force India→Racing Point→Aston Martin 记同一支队）。
 TEAM_CN = {
     "McLaren": "McLaren 迈凯伦", "Ferrari": "Ferrari 法拉利",
     "Red Bull Racing": "Red Bull 红牛", "Mercedes": "Mercedes 梅赛德斯",
