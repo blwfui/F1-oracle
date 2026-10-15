@@ -46,10 +46,26 @@
 ⚠️ 检验单位是 **172 场**，不是 6 万个圈：每场的逐圈 Δ 先平均成一个点，且相邻圈的窗口重叠 4/5，
 有效样本量是**场**。
 
-> ⚠️ **所有超参都是在同一批 173 场上选出来的，没有留出集**（`k`、融合权重、罚退收缩 `α`、逐圈 `gain`）。
-> 粗切分复核（2018–2021 / 2022–2025 分半）显示 `k` 与权重的选点在两半一致、不是灾难性过拟合，
-> 但上面的名义 p 值**没有扣除"从十几组里挑最好"这件事**，应当读作偏乐观。
-> 这一条尚未修（见 `docs/` 审查报告 H4）。
+> **结论强度：留出验证已做**（`python -m scripts.holdout_eval --loso`，落档 `docs/留出集验证.md`）。
+> 超参只在**看不见的年份**上重选（每折 75 组：Elo `k`×`dnf_policy` 18、罚退收缩 `α`×`min_pen` 15、
+> 赛前/赛后融合权重各 21），再在被锁起来的年份上评估：
+>
+> | 协议 | 赛前 Δρ（t） | 赛后 Δρ（t） |
+> |---|---:|---:|
+> | 前向滚动 OOF（n = 114，**唯一无泄漏**） | **+0.0354**（3.71） | **+0.0248**（3.73） |
+> | 主切分：2018–2022 选 → 2023–2025 评（n = 70） | **+0.0314**（2.66） | +0.0169（2.00，踩线） |
+>
+> **结论成立**：留出增益全为正，跨 5 个赛季 **5/5** 为正 —— 不是灾难性过拟合。
+> 但要扣掉乐观量：**同一批 test 场上「样本内」口径是 +0.0400 / +0.0202，比留出高
+> 0.0086 / 0.0033（21% / 16%）**。所以正文那两行 **t = 4.94 / 4.16 是样本内口径**、
+> 应读作偏乐观；上表才是已经扣掉"从 75 组里挑最好"这件事的留出结果。
+> 另有两条不能外推的选点：罚退收缩 `α` 与 Elo `k` 在各折间不稳定（`α` 取遍 0.5/0.75/1），
+> 所以 `α = 0.75` 只能说"一组效果相近的取值之一"，不是"调出来的最优值"。
+> 唯一被 8/8 折一致选中的是 `dnf_policy = finishers_only`。
+>
+> ⚠️ **本次留出验证没有覆盖逐圈预测那组数字**：`gain`（0.25）与窗口宽度仍是样本内选的，
+> 因为算出那组口径的脚本本身还没入库（审查报告 M4）。上面「赛中逐圈预测」的 Δρ 与 t
+> **不享受这次留出验证**，仍应读作样本内。
 
 ### ρ 是什么，为什么不用「准确率」
 
@@ -159,13 +175,15 @@ python -m scripts.export_replay 2023 3     # 2023 年第 3 站（轮次，不是
 
 ```bash
 pip install -r requirements-dev.txt
-pytest                     # 92 项，约 3 秒
+pytest                     # 107 项，约 5 秒
 ```
 
 测试**不需要数据库、也不联网**（内存 SQLite 夹具），跑的全是已经踩过的坑：
 完赛/退赛语义的两套实现必须逐字一致、最快圈积分规则按年份、车队血缘分并、
 回测框架的防泄漏结构、AI 查询守卫的真值表（含 CTE 与 `load_extension`）、
-入库完整性判据。CI 在 `.github/workflows/ci.yml`。
+入库完整性判据，以及**留出验证的预注册判据本身**（`tests/test_holdout.py`
+把 `Δρ>0 / t>2 / 正向年份≥半数` 钉死 —— 事后放松判据会直接测试失败）。
+CI 在 `.github/workflows/ci.yml`。
 
 ### 项目结构
 
@@ -176,8 +194,9 @@ src/
   model/            预测层：回测框架 / 预测器库 / 逐圈分析 / 脏圈识别 / 车队身份
   dashboard/        Streamlit 界面，六个页面
 scripts/            回测、导入、评估、演示等命令行工具
+                    （含 holdout_eval.py —— 留出验证：选参与评估分离）
 tests/              回归测试（不需要数据库）
-docs/               评估报告、对标分析、审查报告与回放动画指南
+docs/               评估报告、对标分析、审查报告、留出验证记录与回放动画指南
 ```
 
 `src/model/` 的防泄漏是**结构性**的：`make_context()` 按预测时点（`pre_quali` / `post_quali`）
@@ -278,12 +297,31 @@ Both progress windows agree and are positive — Δρ = **+0.0179** over 10%–5
 ⚠️ The unit of the test is **172 races**, not 60,000 laps: each race's lap deltas are averaged
 into a single point, and adjacent windows overlap 4/5 — the effective sample size is races.
 
-> ⚠️ **Every hyperparameter was selected on this same set of 173 races, with no holdout**
-> (`k`, blend weights, the grid-penalty shrink `α`, the lap-by-lap `gain`). A coarse split
-> check (2018–2021 vs 2022–2025) shows the chosen `k` and weights are stable across halves —
-> not catastrophic overfitting — but the nominal p-values above **do not account for picking the
-> best of a dozen configurations**, so read them as somewhat optimistic. Not yet fixed (H4 in
-> the `docs/` audit report).
+> **How strong is this claim? Holdout validation has been done**
+> (`python -m scripts.holdout_eval --loso`, recorded in `docs/留出集验证.md`).
+> Hyperparameters are re-selected on **years the tuner never sees** (75 configs per fold:
+> Elo `k`×`dnf_policy` 18, grid-penalty `α`×`min_pen` 15, pre/post blend weights 21 each),
+> then evaluated on the locked-away years:
+>
+> | Protocol | Pre-quali Δρ (t) | Post-quali Δρ (t) |
+> |---|---:|---:|
+> | Walk-forward OOF (n = 114, **the only leak-free one**) | **+0.0354** (3.71) | **+0.0248** (3.73) |
+> | Main split: tune 2018–2022 → test 2023–2025 (n = 70) | **+0.0314** (2.66) | +0.0169 (2.00, on the line) |
+>
+> **The claim holds**: every holdout gain is positive, **5/5** seasons positive — not
+> catastrophic overfitting. But discount the optimism: **on that same test set the in-sample
+> number is +0.0400 / +0.0202, i.e. 0.0086 / 0.0033 (21% / 16%) higher.** So the
+> **t = 4.94 / 4.16 is the in-sample figure** and should be read as optimistic;
+> the table above is what remains after paying for "best of 75 configurations".
+> Two knobs cannot be extrapolated: the penalty shrink `α` and Elo `k` are unstable across
+> folds (`α` lands on 0.5, 0.75 and 1 in different folds), so `α = 0.75` is "one of a set of
+> near-equivalent choices", not "the tuned optimum". The only knob picked unanimously by
+> 8/8 folds is `dnf_policy = finishers_only`.
+>
+> ⚠️ **The lap-by-lap numbers are NOT covered by this holdout validation**: `gain` (0.25) and the
+> window width are still tuned in-sample, because the script that produces that metric is not in
+> the repo yet (audit item M4). The in-race lap-by-lap Δρ and t above therefore still count as
+> in-sample.
 
 ### Why ρ, not "accuracy"
 
@@ -410,7 +448,7 @@ language, see the [replay guide](docs/replay-guide.md).**
 
 ```bash
 pip install -r requirements-dev.txt
-pytest                     # 92 tests, ~3 seconds
+pytest                     # 107 tests, ~5 seconds
 ```
 
 The tests need **no database and no network** (in-memory SQLite fixtures). They cover the
@@ -429,8 +467,9 @@ src/
   model/            prediction layer: backtest framework / predictors / lap analysis / dirty-lap detection / team identity
   dashboard/        Streamlit UI, six pages
 scripts/            backtest, ingest, evaluation and demo CLIs
+                    (incl. holdout_eval.py — holdout validation: tuning split from evaluation)
 tests/              regression tests (no database needed)
-docs/               evaluation reports, benchmarks, audit report and the replay guide
+docs/               evaluation reports, benchmarks, audit report, holdout record and replay guide
 ```
 
 Leakage prevention in `src/model/` is **structural**: `make_context()` decides which fields
