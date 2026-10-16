@@ -53,9 +53,12 @@
 > | 协议 | 赛前 Δρ（t） | 赛后 Δρ（t） |
 > |---|---:|---:|
 > | 前向滚动 OOF（n = 114，**唯一无泄漏**） | **+0.0354**（3.71） | **+0.0248**（3.73） |
-> | 主切分：2018–2022 选 → 2023–2025 评（n = 70） | **+0.0314**（2.66） | +0.0169（2.00，踩线） |
+> | 主切分：2018–2022 选 → 2023–2025 评（n = 70） | **+0.0314**（2.66） | +0.0169（**1.998**，未过 \|t\|>2） |
 >
-> **结论成立**：留出增益全为正，跨 5 个赛季 **5/5** 为正 —— 不是灾难性过拟合。
+> **结论成立但有条件**：留出增益全为正，跨 5 个赛季 **5/5** 为正 —— 不是灾难性过拟合。
+> **两个严格前瞻协议共 4 个预注册门槛，过 3 个**（留一赛季那两条已标注非前瞻，不计入）。
+> 没过的是主切分赛后那条：t = **1.998**，门槛是严格 `|t| > 2`，**差 0.002 也是没过**；
+> 最硬的前向滚动两个口径都过（3.71 / 3.73）。
 > 但要扣掉乐观量：**同一批 test 场上「样本内」口径是 +0.0400 / +0.0202，比留出高
 > 0.0086 / 0.0033（21% / 16%）**。所以正文那两行 **t = 4.94 / 4.16 是样本内口径**、
 > 应读作偏乐观；上表才是已经扣掉"从 75 组里挑最好"这件事的留出结果。
@@ -202,7 +205,7 @@ python -m scripts.export_replay 2023 3     # 2023 年第 3 站（轮次，不是
 
 ```bash
 pip install -r requirements-dev.txt
-pytest                     # 119 项，约 15 秒
+pytest                     # 129 项，约 5 秒
 ```
 
 测试**不需要数据库、也不联网**（内存 SQLite 夹具），跑的全是已经踩过的坑：
@@ -211,16 +214,22 @@ pytest                     # 119 项，约 15 秒
 入库完整性判据、**留出验证的预注册判据本身**（`tests/test_holdout.py`
 把 `Δρ>0 / t>2 / 正向年份≥半数` 钉死 —— 事后放松判据会直接测试失败）、
 **仪表板的 SQL 卫生**（`tests/test_dashboard_sql.py` 静态扫描：任何把变量拼进
-SQL 值的写法都会红，除非显式加进白名单并写明理由）、以及导出层的
-`<script>` 转义与 `times()` 缓存语义。
+SQL 值的写法都会红，除非显式加进白名单并写明理由）、导出层的
+`<script>` 转义与 `times()` 缓存语义，以及**核验入口自身的机制**
+（`tests/test_verify_claims.py`：把 README 改一个数字，核验必须跟着变红 ——
+防的是"尺子把文档值抄成常量、于是永远报全绿"这种假绿）。
 CI 在 `.github/workflows/ci.yml`。
 
 **另有一条"自己验"的入口**，与测试互补 —— 测试管"别退回去"，这条管"数字是真的"：
 
 ```bash
-python -m scripts.verify_claims          # 与 README 里的字符串逐条比对，判 ✅/❌，约 4 秒
+python -m scripts.verify_claims          # 文档值现场解析 README，逐条判 ✅/❌，约 5 秒
 python -m scripts.verify_claims --lap    # 含逐圈 Δρ（多约 80 秒）
 ```
+
+它**不保存任何文档值**：54 条断言里的每一条，文档值都由 55 条锚点正则**现场从
+`README.md` 解析**。锚点找不到或命中多处都判失败；容差自动取"文档写出的那一位的一半"，
+所以没有能人为放宽的旋钮 —— README 漂了它就会红。
 
 ### 项目结构
 
@@ -231,7 +240,7 @@ src/
   model/            预测层：回测框架 / 预测器库 / 逐圈分析 / 脏圈识别 / 车队身份
   dashboard/        Streamlit 界面，六个页面
 scripts/            回测、导入、评估、演示等命令行工具
-                    verify_claims.py  —— 与 README 数字逐条比对的核验入口（自己验）
+                    verify_claims.py  —— 核验入口：文档值现场解析 README，逐条判 ✅/❌（自己验）
                     holdout_eval.py   —— 留出验证：选参与评估分离
 tests/              回归测试（不需要数据库）
 docs/               评估报告、对标分析、审查报告、留出验证记录与回放动画指南
@@ -344,10 +353,14 @@ into a single point, and adjacent windows overlap 4/5 — the effective sample s
 > | Protocol | Pre-quali Δρ (t) | Post-quali Δρ (t) |
 > |---|---:|---:|
 > | Walk-forward OOF (n = 114, **the only leak-free one**) | **+0.0354** (3.71) | **+0.0248** (3.73) |
-> | Main split: tune 2018–2022 → test 2023–2025 (n = 70) | **+0.0314** (2.66) | +0.0169 (2.00, on the line) |
+> | Main split: tune 2018–2022 → test 2023–2025 (n = 70) | **+0.0314** (2.66) | +0.0169 (**1.998**, fails \|t\|>2) |
 >
-> **The claim holds**: every holdout gain is positive, **5/5** seasons positive — not
-> catastrophic overfitting. But discount the optimism: **on that same test set the in-sample
+> **The claim holds, with a caveat**: every holdout gain is positive, **5/5** seasons positive —
+> not catastrophic overfitting. **Across the two strictly prequential protocols, 3 of the 4
+> pre-registered thresholds pass** (the leave-one-season pair is flagged non-prequential and
+> not counted). The one that fails is the main-split post-quali cell: t = **1.998** against a
+> strict `|t| > 2` — **missing by 0.002 still counts as missing**. Walk-forward, the strongest
+> protocol, passes both cells (3.71 / 3.73). But discount the optimism: **on that same test set the in-sample
 > number is +0.0400 / +0.0202, i.e. 0.0086 / 0.0033 (21% / 16%) higher.** So the
 > **t = 4.94 / 4.16 is the in-sample figure** and should be read as optimistic;
 > the table above is what remains after paying for "best of 75 configurations".
@@ -516,7 +529,7 @@ language, see the [replay guide](docs/replay-guide.md).**
 
 ```bash
 pip install -r requirements-dev.txt
-pytest                     # 119 tests, ~15 seconds
+pytest                     # 129 tests, ~5 seconds
 ```
 
 The tests need **no database and no network** (in-memory SQLite fixtures). They cover the
@@ -527,17 +540,25 @@ and `load_extension`), the ingestion completeness criteria, **the holdout valida
 pre-registered criteria themselves** (`tests/test_holdout.py` pins `Δρ>0 / t>2 / majority of
 positive years` — loosening them after the fact fails the build), **dashboard SQL hygiene**
 (`tests/test_dashboard_sql.py` statically scans for any variable interpolated into SQL; it fails
-unless the name is explicitly whitelisted with a reason), and the export layer's `<script>`
-escaping and `times()` cache semantics.
+unless the name is explicitly whitelisted with a reason), the export layer's `<script>`
+escaping and `times()` cache semantics, and **the verifier's own mechanism**
+(`tests/test_verify_claims.py`: change one number in the README and the verification must go
+red — the failure mode being guarded against is a ruler that copies the documented values into
+constants and therefore reports all-green forever).
 CI lives in `.github/workflows/ci.yml`.
 
 **There is also a "verify it yourself" entry point**, complementary to the tests — the tests
 guard against regressions, this one checks that the numbers are real:
 
 ```bash
-python -m scripts.verify_claims          # compares against the README strings, ✅/❌, ~4s
+python -m scripts.verify_claims          # doc values parsed live from README, ✅/❌, ~5s
 python -m scripts.verify_claims --lap    # includes lap-by-lap Δρ (+80s)
 ```
+
+It **stores no documented value of its own**: for each of the 54 assertions the expected number
+is parsed **live out of `README.md`** via 55 anchor regexes. A missing or ambiguous anchor is a
+failure; the tolerance is derived from the precision the README itself writes (half of the last
+digit), so there is no knob to widen it — if the README drifts, this goes red.
 
 ### Layout
 
@@ -548,7 +569,7 @@ src/
   model/            prediction layer: backtest framework / predictors / lap analysis / dirty-lap detection / team identity
   dashboard/        Streamlit UI, six pages
 scripts/            backtest, ingest, evaluation and demo CLIs
-                    verify_claims.py  — verifies the README numbers, row by row
+                    verify_claims.py  — verification entry: doc values parsed live from README
                     holdout_eval.py   — holdout validation: tuning split from evaluation
 tests/              regression tests (no database needed)
 docs/               evaluation reports, benchmarks, audit report, holdout record and replay guide
